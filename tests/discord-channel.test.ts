@@ -15,6 +15,7 @@ const config = {
   discordGuild: 'guild',
   discordUsers: ['person'],
 };
+const allowAll = { ...config, discordUsers: ['*'] };
 const identity: ChannelIdentityContext = {
   provider: 'discord',
   tenant: { id: 'guild' },
@@ -38,7 +39,7 @@ const message: IncomingMessage = {
     revisionId: '1',
   },
 };
-function fixture(paused = false) {
+function fixture(paused = false, channelConfig: typeof config = config) {
   const thread = {
     runAgent: vi.fn<Thread['runAgent']>(async () => undefined),
     post: vi.fn<Thread['post']>(async () => ({ id: 'reply' })),
@@ -50,7 +51,7 @@ function fixture(paused = false) {
     thread,
     report,
     handlers: discordHandlers({
-      config,
+      config: channelConfig,
       ownerId: 'owner',
       paused: () => paused,
       report,
@@ -73,6 +74,36 @@ it('requires explicit Discord guild and user allowlists for canonical owner iden
     discordIdentity({ ...identity, provider: 'slack' }, config, 'owner'),
   ).toBeNull();
 });
+it('treats a lone * Discord allowlist as any human in the configured guild', () => {
+  expect(
+    discordIdentity(
+      { ...identity, actor: { id: 'anyone', kind: 'human' } },
+      allowAll,
+      'owner',
+    )?.id,
+  ).toBe('owner');
+  expect(
+    discordIdentity(
+      {
+        ...identity,
+        tenant: { id: 'other' },
+        actor: { id: 'anyone', kind: 'human' },
+      },
+      allowAll,
+      'owner',
+    ),
+  ).toBeNull();
+  expect(
+    discordIdentity(
+      { ...identity, actor: { id: 'anyone', kind: 'bot' } },
+      allowAll,
+      'owner',
+    ),
+  ).toBeNull();
+  expect(
+    discordIdentity(identity, { ...config, discordUsers: [] }, 'owner'),
+  ).toBeNull();
+});
 it('answers an allowed mention once, then only subscribed follow-ups', async () => {
   const f = fixture();
   await f.handlers.mention({ thread: f.thread, message });
@@ -83,6 +114,15 @@ it('answers an allowed mention once, then only subscribed follow-ups', async () 
   f.thread.isSubscribed.mockResolvedValue(true);
   await f.handlers.message({ thread: f.thread, message });
   expect(f.thread.runAgent).toHaveBeenCalledTimes(2);
+});
+it('answers mentions from any human when Discord allowlist is a lone *', async () => {
+  const f = fixture(false, allowAll);
+  await f.handlers.mention({
+    thread: f.thread,
+    message: { ...message, actor: { id: 'stranger', kind: 'human' } },
+  });
+  expect(f.thread.subscribe).toHaveBeenCalledTimes(1);
+  expect(f.thread.runAgent).toHaveBeenCalledTimes(1);
 });
 it('ignores nonhuman actors and changed/deleted messages without side effects', async () => {
   const f = fixture();

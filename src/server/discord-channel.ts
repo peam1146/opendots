@@ -10,7 +10,7 @@ import {
   safeFailure,
   type ChannelFailureReport,
 } from './channel-safety.js';
-import type { PlatformConfig } from './platform-config.js';
+import { discordUserAllowed, type PlatformConfig } from './platform-config.js';
 
 export type DiscordConfig = Pick<
   PlatformConfig,
@@ -35,7 +35,7 @@ export function discordIdentity(
     context.provider !== 'discord' ||
     context.tenant.id !== config.discordGuild ||
     context.actor.kind !== 'human' ||
-    !config.discordUsers.includes(context.actor.id)
+    !discordUserAllowed(config.discordUsers, context.actor.id)
   )
     return null;
   return { id: ownerId, name: 'OpenDots owner' };
@@ -52,7 +52,7 @@ export function discordHandlers(options: {
     message.platform === 'discord' &&
     message.user?.id === options.ownerId &&
     message.actor.kind === 'human' &&
-    options.config.discordUsers.includes(message.actor.id) &&
+    discordUserAllowed(options.config.discordUsers, message.actor.id) &&
     (message.operation?.kind ?? 'created') === 'created';
   async function notice(thread: Turn['thread'], text: string) {
     try {

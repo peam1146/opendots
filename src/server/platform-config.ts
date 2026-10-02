@@ -57,6 +57,20 @@ export function discordConfigured(
   );
 }
 
+/**
+ * Discord user allowlist match. A lone `*` entry allows any human actor
+ * (guild scope is enforced separately). Explicit snowflake lists match by id.
+ * An empty list never matches (Discord stays not configured).
+ */
+export function discordUserAllowed(
+  users: readonly string[],
+  actorId: string,
+): boolean {
+  return users.length === 1 && users[0] === '*'
+    ? true
+    : users.includes(actorId);
+}
+
 function channelSetupState(
   declared: boolean,
   partial: boolean,
