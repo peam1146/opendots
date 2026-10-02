@@ -72,6 +72,28 @@ export async function ensure(
           ? { url: \`http://127.0.0.1:\${settled.port}\` }
           : {}),
   };
+}
+
+export async function listOwned(): Promise<ComputerState[]> {
+  try {
+    const containers = (
+      await docker.listContainers({
+        all: true,
+        filters: { label: [\`\${OWNER_LABEL}=true\`] },
+      })
+    ).filter((container) => ours(container.Labels));
+    return containers.map((container) => ({
+      botId: container.Labels?.[BOT_LABEL] ?? "unknown",
+      container: (container.Names?.[0] ?? "").replace(/^\\//, ""),
+      status: container.State,
+      ...(container.Created
+        ? { startedAt: new Date(container.Created * 1000).toISOString() }
+        : {}),
+      ...(portOf(container.Ports) ? { port: portOf(container.Ports) } : {}),
+    }));
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
 }`;
 
 const indexUpstream = `import {
@@ -101,6 +123,16 @@ app.post("/computers/:botId/ensure", async (context) => {
       error instanceof DockerUnavailableError ||
       error instanceof ComputerNotAnsweringError
     ) {
+      return context.json({ error: error.message }, 503);
+    }
+    throw error;
+  }
+});
+app.get("/computers", async (context) => {
+  try {
+    return context.json({ computers: await listOwned() });
+  } catch (error) {
+    if (error instanceof DockerUnavailableError) {
       return context.json({ error: error.message }, 503);
     }
     throw error;
@@ -166,6 +198,10 @@ it('publishes cluster-reachable ports and returns access-host URLs', () => {
   );
   expect(patched).toContain('existing.port !== options.hostPort');
   expect(patched).toContain('HostIp: "127.0.0.1"');
+  expect(patched).toContain(
+    'info.NetworkSettings?.Ports?.[COMPUTER_PORT]?.[0]?.HostPort',
+  );
+  expect(patched).toContain('return await Promise.all');
 });
 
 it('wires COMPUTER_ACCESS_HOST into ensure and caps Bun idleTimeout for pulls', () => {
@@ -179,6 +215,7 @@ it('wires COMPUTER_ACCESS_HOST into ensure and caps Bun idleTimeout for pulls', 
   expect(patched).toContain('pathname.endsWith("/ensure")');
   expect(patched).toContain('COMPUTER_ACCESS_HOST');
   expect(patched).toContain('hostPort: publishedHostPort(');
+  expect(patched).toContain('url: `http://${accessHost}:${computer.port}`');
   expect(patched.indexOf('ImageUnavailableError')).toBeLessThan(
     patched.indexOf('DockerUnavailableError ||'),
   );

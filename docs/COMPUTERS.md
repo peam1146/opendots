@@ -77,7 +77,17 @@ ports:
 
 `targetPort` must equal `port`: DinD publishes child containers onto the Pod netns at that host port. 3. **App env**: set `COMPUTER_ACCESS_HOST` to that Service DNS name (short name in the namespace is fine). Keep `COMPUTER_NAMESPACE` aligned with the deployment (e.g. `bigc-opendots`). 4. **Supervisor env**: same `COMPUTER_ACCESS_HOST`, same publish base/span, `COMPUTER_IMAGE` digest, tokens, and usually empty `COMPUTER_NETWORK`. 5. Rebuild/redeploy the Softnetics supervisor image that includes these harden patches after merge.
 
-The app allowlist accepts only: `{ns}-computer-{id}:4100`, loopback+published port when the supervisor URL host is also loopback, or `{COMPUTER_ACCESS_HOST}:{publishedPort}` when configured. Arbitrary returned URLs are still rejected.
+The app allowlist accepts only: `{ns}-computer-{id}:4100`, loopback+published port when the supervisor URL host is also loopback, or `{COMPUTER_ACCESS_HOST}:{publishedPort}` when configured. When `COMPUTER_ACCESS_HOST` is set, the app **never** falls back to DinD container DNS — a missing published port is reported explicitly (Start again after enabling option B). Arbitrary returned URLs are still rejected.
+
+### Still seeing “Computer service is unavailable”?
+
+`status()` shows that string when it cannot complete `GET {computer}/control` after the supervisor lists a running computer (or when allowlist/publish checks fail). After ensure succeeds, check in order:
+
+1. **App env** has the same `COMPUTER_ACCESS_HOST` as the supervisor (hostname only, no scheme/port).
+2. **Supervisor env** has `COMPUTER_ACCESS_HOST`, publish base/span, and preferably empty `COMPUTER_NETWORK`.
+3. **Service** exposes `4300` plus every port in `[BASE, BASE+SPAN)` with `port == targetPort` onto the DinD/Pod netns.
+4. **Click Start again** after enabling option B so owned containers are recreated with `0.0.0.0` publish bindings (volumes retained).
+5. From the app Pod: `wget -qO- http://$COMPUTER_ACCESS_HOST:<dot-port>/health` (or `/control` with the Dot token) must succeed.
 
 ## Use the computer
 

@@ -120,6 +120,32 @@ export function hardenSupervisorDocker(source) {
       'Pinned OpenBot ensure URL contract changed; review before building.',
     );
 
+  const listOwnedAnchor = `export async function listOwned(): Promise<ComputerState[]> {
+  try {
+    const containers = (
+      await docker.listContainers({
+        all: true,
+        filters: { label: [\`\${OWNER_LABEL}=true\`] },
+      })
+    ).filter((container) => ours(container.Labels));
+    return containers.map((container) => ({
+      botId: container.Labels?.[BOT_LABEL] ?? "unknown",
+      container: (container.Names?.[0] ?? "").replace(/^\\//, ""),
+      status: container.State,
+      ...(container.Created
+        ? { startedAt: new Date(container.Created * 1000).toISOString() }
+        : {}),
+      ...(portOf(container.Ports) ? { port: portOf(container.Ports) } : {}),
+    }));
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
+}`;
+  if (source.split(listOwnedAnchor).length !== 2)
+    throw new Error(
+      'Pinned OpenBot listOwned contract changed; review before building.',
+    );
+
   let next = source.replace(
     errorAnchor,
     `${errorAnchor}
@@ -236,6 +262,51 @@ async function ensureComputerImage(image: string): Promise<void> {
             : {}),`,
   );
 
+  // listContainers sometimes omits PublicPort under DinD even when inspect shows
+  // HostPort. status() needs that port to build COMPUTER_ACCESS_HOST URLs.
+  next = next.replace(
+    listOwnedAnchor,
+    `export async function listOwned(): Promise<ComputerState[]> {
+  try {
+    const containers = (
+      await docker.listContainers({
+        all: true,
+        filters: { label: [\`\${OWNER_LABEL}=true\`] },
+      })
+    ).filter((container) => ours(container.Labels));
+    return await Promise.all(
+      containers.map(async (container) => {
+        const name = (container.Names?.[0] ?? "").replace(/^\\//, "");
+        let port = portOf(container.Ports);
+        if (port === undefined) {
+          try {
+            const info = await docker.getContainer(name).inspect();
+            if (ours(info.Config?.Labels)) {
+              port = parseHostPort(
+                info.NetworkSettings?.Ports?.[COMPUTER_PORT]?.[0]?.HostPort,
+              );
+            }
+          } catch {
+            // Keep listing without a port; the app reports a clear publish error.
+          }
+        }
+        return {
+          botId: container.Labels?.[BOT_LABEL] ?? "unknown",
+          container: name,
+          status: container.State,
+          ...(container.Created
+            ? { startedAt: new Date(container.Created * 1000).toISOString() }
+            : {}),
+          ...(port !== undefined ? { port } : {}),
+        };
+      }),
+    );
+  } catch (error) {
+    throw new DockerUnavailableError(String(error));
+  }
+}`,
+  );
+
   if (!next.includes('await ensureComputerImage(options.image);'))
     throw new Error(
       'Pinned OpenBot ensure image pull patch did not apply; review before building.',
@@ -251,6 +322,10 @@ async function ensureComputerImage(image: string): Promise<void> {
   if (!next.includes('HostIp: "0.0.0.0"'))
     throw new Error(
       'Pinned OpenBot cluster PortBindings patch did not apply; review before building.',
+    );
+  if (!next.includes('info.NetworkSettings?.Ports?.[COMPUTER_PORT]'))
+    throw new Error(
+      'Pinned OpenBot listOwned port inspect patch did not apply; review before building.',
     );
   return next;
 }
@@ -314,6 +389,21 @@ export function hardenSupervisorIndex(source) {
   if (source.split(idleAnchor).length !== 2)
     throw new Error(
       'Pinned OpenBot serve idleTimeout contract changed; review before building.',
+    );
+
+  const listRouteAnchor = `app.get("/computers", async (context) => {
+  try {
+    return context.json({ computers: await listOwned() });
+  } catch (error) {
+    if (error instanceof DockerUnavailableError) {
+      return context.json({ error: error.message }, 503);
+    }
+    throw error;
+  }
+});`;
+  if (source.split(listRouteAnchor).length !== 2)
+    throw new Error(
+      'Pinned OpenBot GET /computers contract changed; review before building.',
     );
 
   return source
@@ -423,6 +513,31 @@ try {
       return context.json({ error: error.message }, 503);
     }
     throw error;`,
+    )
+    .replace(
+      listRouteAnchor,
+      `app.get("/computers", async (context) => {
+  try {
+    const computers = await listOwned();
+    return context.json({
+      computers: accessHost
+        ? computers.map((computer) =>
+            computer.port
+              ? {
+                  ...computer,
+                  url: \`http://\${accessHost}:\${computer.port}\`,
+                }
+              : computer,
+          )
+        : computers,
+    });
+  } catch (error) {
+    if (error instanceof DockerUnavailableError) {
+      return context.json({ error: error.message }, 503);
+    }
+    throw error;
+  }
+});`,
     )
     .replace(
       idleAnchor,
