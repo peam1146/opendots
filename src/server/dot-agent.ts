@@ -179,12 +179,16 @@ export class DotAgent extends AbstractAgent {
           initialSettings.memoryAllowed && dot.memoryAllowed
             ? this.store.memories().map((memory) => memory.text)
             : [];
+        // Chimera and some OpenAI-compat gateways only expose POST /v1/responses
+        // (chat/completions returns 405). prompt_cache_key satisfies affinity.
         const adapter = openaiCompatibleText(this.config.model, {
           apiKey: this.config.apiKey,
           baseURL: this.config.baseUrl ?? 'https://api.openai.com/v1',
-          api: 'chat-completions',
+          api: 'responses',
           maxRetries: 1,
         });
+        const promptCacheKey =
+          this.config.promptCacheKey ?? this.workspace.ownerId;
         const serverTools = [
           ...tools,
           ...pageTools(pages),
@@ -226,7 +230,10 @@ export class DotAgent extends AbstractAgent {
               abortController: ctx.abortController,
               threadId: ctx.input.threadId,
               runId: ctx.input.runId,
-              modelOptions: { max_completion_tokens: 2200 },
+              modelOptions: {
+                max_output_tokens: 2200,
+                prompt_cache_key: promptCacheKey,
+              },
               agentLoopStrategy: maxIterations(
                 dot.skillDeliveryEnabled && conversation.learningContainerId
                   ? 10

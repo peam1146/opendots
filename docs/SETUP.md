@@ -33,6 +33,7 @@ Edit `.env` on the server and restart after changes:
 | `INTELLIGENCE_API_URL`, `INTELLIGENCE_WS_URL` | Endpoint overrides for your Intelligence deployment       |
 | `OPENAI_API_KEY`, `OPENAI_MODEL`              | Model credential and model identifier                     |
 | `OPENAI_BASE_URL`                             | Compatible model API endpoint                             |
+| `OPENAI_PROMPT_CACHE_KEY`                     | Optional Responses affinity key; defaults to `OWNER_ID`   |
 | `OWNER_ID`                                    | Stable identity used for this deployment's conversations  |
 | `DATABASE_PATH`                               | SQLite file containing pages, workspace and work metadata |
 | `OWNER_TOKEN`                                 | Application access token; required for external bindings  |
@@ -41,6 +42,8 @@ Edit `.env` on the server and restart after changes:
 Optional Slack and Discord channel variables are documented in [Slack](#slack) and [Discord](#discord). Leave them empty to keep those integrations off.
 
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.
+
+Dot compute uses the OpenAI-compatible **Responses** adapter (`POST /v1/responses`), not Chat Completions. Gateways such as Softnetics Chimera that only expose Responses (and reject `/v1/chat/completions` with HTTP 405) work with this path. Those routers often require a stable `prompt_cache_key` for affinity; OpenDots sends `OPENAI_PROMPT_CACHE_KEY` when set, otherwise `OWNER_ID`. GitOps for a deployment can leave the optional key unset when `OWNER_ID` is already a stable deployment identity (for example `bigc-opendots`), or set `OPENAI_PROMPT_CACHE_KEY` explicitly when affinity should differ from the workspace owner id.
 
 ## Pages and page conversations
 

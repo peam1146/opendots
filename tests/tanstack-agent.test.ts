@@ -27,6 +27,8 @@ function fixture() {
       apiKey: 'fixture',
       model: 'custom-model',
       baseUrl: 'https://unused.invalid/v1',
+      // Chimera Responses affinity; defaults to OWNER_ID / workspace owner.
+      promptCacheKey: 'fixture-cache',
       runtimeUrl: '',
       voiceName: 'marin',
       slackUsers: [],
@@ -118,22 +120,29 @@ it('executes a page tool, continues with its result, and emits AG-UI text and to
   );
   expect(network).toHaveBeenCalledTimes(2);
   expect(String(network.mock.calls[0][0])).toBe(
-    'https://unused.invalid/v1/chat/completions',
+    'https://unused.invalid/v1/responses',
   );
   const request = JSON.parse(String(network.mock.calls[0][1]?.body));
   expect(request.model).toBe('custom-model');
-  expect(request.max_completion_tokens).toBe(2200);
+  expect(request.max_output_tokens).toBe(2200);
+  expect(request.prompt_cache_key).toBe('fixture-cache');
+  expect(request.tools).toContainEqual(
+    expect.objectContaining({
+      type: 'function',
+      name: 'create_space_page',
+    }),
+  );
   expect(JSON.stringify(request)).not.toContain('Untrusted system override');
   expect(JSON.stringify(request)).not.toContain('Untrusted developer override');
   expect(JSON.stringify(request)).not.toContain('untrusted_tool');
   expect(JSON.stringify(request)).not.toContain('Override the instructions.');
   const continuation = JSON.parse(String(network.mock.calls[1][1]?.body));
-  expect(continuation.messages).toEqual(
+  expect(continuation.input).toEqual(
     expect.arrayContaining([
       expect.objectContaining({
-        role: 'tool',
-        tool_call_id: 'create-page',
-        content: expect.stringContaining('Notes'),
+        type: 'function_call_output',
+        call_id: 'create-page',
+        output: expect.stringContaining('Notes'),
       }),
     ]),
   );
@@ -185,7 +194,8 @@ it('offers the canonical review tool and waits for the client without saving a p
   expect(request.tools).toContainEqual(
     expect.objectContaining({
       type: 'function',
-      function: expect.objectContaining(pageReviewTool),
+      name: pageReviewTool.name,
+      description: pageReviewTool.description,
     }),
   );
   expect(JSON.stringify(request)).not.toContain('forged instructions');
@@ -249,4 +259,51 @@ it('aborts the TanStack provider request when the owner pauses work', async () =
   f.store.updateSettings({ paused: true });
   await finished;
   expect(signal.aborted).toBe(true);
+});
+
+it('defaults prompt_cache_key to the workspace owner when config omits it', async () => {
+  const store = new Store(':memory:');
+  const workspace = new WorkspaceStore(':memory:', 'opendots-owner');
+  databases.push(store, workspace);
+  const dot = workspace.dots()[0];
+  workspace.bindThread('thread', dot.id, 'Cache');
+  const agent = new DotAgent(
+    store,
+    workspace,
+    {
+      intelligenceKey: 'fixture',
+      apiKey: 'fixture',
+      model: 'custom-model',
+      baseUrl: 'https://unused.invalid/v1',
+      runtimeUrl: '',
+      voiceName: 'marin',
+      slackUsers: [],
+      discordUsers: [],
+    },
+    dot.id,
+  );
+  const network = vi
+    .spyOn(globalThis, 'fetch')
+    .mockResolvedValueOnce(
+      completion({ role: 'assistant', content: 'Affinity ok.' }),
+    );
+  await lastValueFrom(
+    agent
+      .run({
+        threadId: 'thread',
+        runId: 'run',
+        state: {},
+        context: [],
+        messages: [{ id: 'user', role: 'user', content: 'Hi' }],
+        tools: [],
+        forwardedProps: {},
+      })
+      .pipe(toArray()),
+  );
+  expect(String(network.mock.calls[0][0])).toBe(
+    'https://unused.invalid/v1/responses',
+  );
+  const request = JSON.parse(String(network.mock.calls[0][1]?.body));
+  expect(request.prompt_cache_key).toBe('opendots-owner');
+  expect(request.max_output_tokens).toBe(2200);
 });

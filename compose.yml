@@ -22,6 +22,7 @@ services:
       OPENAI_API_KEY: ${OPENAI_API_KEY:-}
       OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
       OPENAI_MODEL: ${OPENAI_MODEL:-}
+      OPENAI_PROMPT_CACHE_KEY: ${OPENAI_PROMPT_CACHE_KEY:-}
       BROWSER_URL: http://browser:4311
       BROWSER_SECRET: ${BROWSER_SECRET:?Set a 24+ character BROWSER_SECRET in .env}
     volumes:
