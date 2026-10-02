@@ -255,7 +255,13 @@ async function ensureComputerImage(image: string): Promise<void> {
   return next;
 }
 
-/** Surface ImageUnavailableError on ensure; lengthen idle timeout for pull+start; wire access host. */
+/**
+ * Surface ImageUnavailableError on ensure; wire access host; keep Bun.serve bootable.
+ *
+ * Bun.serve hard-caps global idleTimeout at 255s (values above throw at boot → CrashLoop).
+ * Cold DinD COMPUTER_IMAGE pull + ensure can exceed that, so raise the ensure path only via
+ * server.timeout (aligned with OpenDots ENSURE_DEADLINE_MS ≈ 580s).
+ */
 export function hardenSupervisorIndex(source) {
   const importAnchor = `import {
   ComputerNotAnsweringError,
@@ -420,8 +426,18 @@ try {
     )
     .replace(
       idleAnchor,
-      // Pull + cold start can exceed two minutes on a fresh DinD with an empty cache.
-      'serve({ port, fetch: app.fetch, idleTimeout: 600 });',
+      `serve({
+  port,
+  // Bun.serve rejects idleTimeout > 255 at boot; keep the global max for non-ensure routes.
+  idleTimeout: 255,
+  fetch(req, server) {
+    // Cold DinD pull + ensure can exceed 255s; OpenDots client budget is ~580s.
+    if (new URL(req.url).pathname.endsWith("/ensure")) {
+      server.timeout(req, 600);
+    }
+    return app.fetch(req, server);
+  },
+});`,
     );
 }
 
