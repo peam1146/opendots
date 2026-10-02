@@ -116,7 +116,7 @@ function fixture(channel = true) {
       discordUsers: [],
     },
     dot.id,
-    channel,
+    channel ? 'Slack conversation' : null,
   );
   const input: RunAgentInput = {
     threadId: 'thread',
@@ -216,4 +216,99 @@ it('exposes only the canonical review tool to web chat and none to Slack', async
   expect(inner.run).toHaveBeenLastCalledWith(
     expect.objectContaining({ tools: [] }),
   );
+});
+
+it('binds Discord and Slack channel threads with provider titles and UUID ids', async () => {
+  inner.run.mockReturnValue(of());
+  for (const title of ['Discord conversation', 'Slack conversation'] as const) {
+    const store = new Store(':memory:');
+    const workspace = new WorkspaceStore(':memory:', 'owner');
+    databases.push(store, workspace);
+    const dot = workspace.dots()[0];
+    const agent = new DotAgent(
+      store,
+      workspace,
+      {
+        intelligenceKey: 'fixture',
+        apiKey: 'fixture',
+        model: 'fixture',
+        baseUrl: 'https://unused.invalid',
+        runtimeUrl: '',
+        voiceName: 'marin',
+        slackUsers: [],
+        discordUsers: [],
+      },
+      dot.id,
+      title,
+    );
+    const threadId = `1555492359171473429-${title}`;
+    await lastValueFrom(
+      agent
+        .run({
+          threadId,
+          runId: 'run',
+          state: {},
+          messages: [],
+          tools: [],
+          context: [],
+          forwardedProps: {},
+        })
+        .pipe(toArray()),
+    );
+    const bound = workspace.requireThread(threadId, dot.id);
+    expect(bound).toMatchObject({
+      title,
+      surface: 'channel',
+      channelKey: threadId,
+    });
+    expect(bound.id).not.toBe(threadId);
+    expect(workspace.conversations().some((t) => t.id === bound.id)).toBe(true);
+  }
+});
+
+it('corrects a generic channel bind title when the provider-specific agent runs', async () => {
+  inner.run.mockReturnValue(of());
+  const store = new Store(':memory:');
+  const workspace = new WorkspaceStore(':memory:', 'owner');
+  databases.push(store, workspace);
+  const dot = workspace.dots()[0];
+  workspace.bindChannelThread(
+    'discord-snowflake',
+    dot.id,
+    'Channel conversation',
+  );
+  const agent = new DotAgent(
+    store,
+    workspace,
+    {
+      intelligenceKey: 'fixture',
+      apiKey: 'fixture',
+      model: 'fixture',
+      baseUrl: 'https://unused.invalid',
+      runtimeUrl: '',
+      voiceName: 'marin',
+      slackUsers: [],
+      discordUsers: [],
+    },
+    dot.id,
+    'Discord conversation',
+  );
+  await lastValueFrom(
+    agent
+      .run({
+        threadId: 'discord-snowflake',
+        runId: 'run',
+        state: {},
+        messages: [],
+        tools: [],
+        context: [],
+        forwardedProps: {},
+      })
+      .pipe(toArray()),
+  );
+  expect(workspace.requireThread('discord-snowflake')).toMatchObject({
+    title: 'Discord conversation',
+    surface: 'channel',
+    channelKey: 'discord-snowflake',
+  });
 });

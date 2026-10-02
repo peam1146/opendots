@@ -26,12 +26,13 @@ export function learningSelector(
         throw new Error(
           'Conversation learning requires a configured channel Dot.',
         );
-      if (
-        !workspace
-          .conversations()
-          .some((thread) => thread.id === input.threadId)
-      )
-        workspace.bindThread(input.threadId, agentId, 'Channel conversation');
+      // Bind under an Intelligence UUID; keep the Channels key as channelKey.
+      if (!workspace.findThread(input.threadId))
+        workspace.bindChannelThread(
+          input.threadId,
+          agentId,
+          'Channel conversation',
+        );
     }
     return (
       workspace.requireThread(input.threadId, agentId).learningContainerId ??

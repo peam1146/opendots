@@ -79,7 +79,7 @@ export class PageService {
           throw new PageError('Space access has been revoked.');
         const thread =
           this.workspace.conversations().find((t) => t.id === threadId) ??
-          this.workspace.bindThread(threadId, dotId, page.title);
+          this.workspace.bindThread(threadId, dotId, page.title, 'page');
         this.workspace.pages.finishThread(pageId, dotId);
         return thread;
       } catch (error) {

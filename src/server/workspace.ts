@@ -5,7 +5,32 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validateLearningSettings } from '../shared/learning.js';
-import type { CallReceipt, Conversation, Dot, Space } from '../shared/types.js';
+import {
+  isIntelligenceThreadId,
+  toIntelligenceThreadId,
+} from './channel-thread.js';
+import type {
+  CallReceipt,
+  Conversation,
+  ConversationSurface,
+  Dot,
+  Space,
+} from '../shared/types.js';
+
+/** Legacy channel bind titles used before surface was stored explicitly. */
+const LEGACY_CHANNEL_TITLES = new Set([
+  'Slack conversation',
+  'Channel conversation',
+  'Discord conversation',
+]);
+
+/** Tables that store thread_bindings.id as a foreign key. */
+const THREAD_ID_TABLES = [
+  ['calls', 'threadId'],
+  ['captures', 'threadId'],
+  ['task_threads', 'threadId'],
+] as const;
+
 export class WorkspaceStore {
   private db: DatabaseSync;
   readonly pages: Pages;
@@ -27,6 +52,9 @@ export class WorkspaceStore {
       ['dots', 'learningContainerId', 'TEXT'],
       ['dots', 'skillDeliveryEnabled', 'INTEGER NOT NULL DEFAULT 0'],
       ['thread_bindings', 'learningContainerId', 'TEXT'],
+      // Default web keeps pre-surface rows openable until legacy title backfill below.
+      ['thread_bindings', 'surface', "TEXT NOT NULL DEFAULT 'web'"],
+      ['thread_bindings', 'channelKey', 'TEXT'],
     ]) {
       if (
         !this.db
@@ -36,6 +64,15 @@ export class WorkspaceStore {
       )
         this.db.exec(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
     }
+    // One-time title heuristic: only known channel bind strings → surface=channel.
+    // Prefer the surface column for all new rows; do not infer from id shape alone.
+    this.db
+      .prepare(
+        `UPDATE thread_bindings SET surface='channel'
+         WHERE surface='web' AND title IN (${[...LEGACY_CHANNEL_TITLES].map(() => '?').join(', ')})`,
+      )
+      .run(...LEGACY_CHANNEL_TITLES);
+    this.migrateChannelThreadIds();
     // Migrate only once: restarting must never restore a revoked grant.
     if (
       !this.db
@@ -228,14 +265,24 @@ export class WorkspaceStore {
     }
     return this.dot(id)!;
   }
+  /** All owner thread bindings (web, page, and channel). Channel rows use
+   * Intelligence-compatible UUID ids; see `channelKey` for the external key. */
   conversations(): Conversation[] {
-    return this.db
-      .prepare(
-        'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
-      )
-      .all(this.ownerId) as unknown as Conversation[];
+    return (
+      this.db
+        .prepare(
+          'SELECT * FROM thread_bindings WHERE ownerId=? ORDER BY createdAt DESC',
+        )
+        .all(this.ownerId) as Array<Record<string, unknown>>
+    ).map((row) => this.mapConversation(row));
   }
-  bindThread(id: string, dotId: string, title: string): Conversation {
+  bindThread(
+    id: string,
+    dotId: string,
+    title: string,
+    surface: ConversationSurface = 'web',
+    channelKey: string | null = null,
+  ): Conversation {
     const dot = this.dot(dotId);
     if (!dot) throw new Error('Dot not found.');
     const value: Conversation = {
@@ -245,10 +292,12 @@ export class WorkspaceStore {
       title,
       createdAt: Date.now(),
       learningContainerId: dot.learningContainerId ?? null,
+      surface,
+      channelKey,
     };
     this.db
       .prepare(
-        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt, learningContainerId) VALUES (?, ?, ?, ?, ?, ?)',
+        'INSERT INTO thread_bindings (id, dotId, ownerId, title, createdAt, learningContainerId, surface, channelKey) VALUES (?, ?, ?, ?, ?, ?, ?, ?)',
       )
       .run(
         id,
@@ -257,14 +306,170 @@ export class WorkspaceStore {
         title,
         value.createdAt,
         value.learningContainerId ?? null,
+        surface,
+        channelKey,
       );
     return value;
   }
+  /**
+   * Bind a Channels conversation under an Intelligence-compatible UUID.
+   * `channelThreadId` may be a Discord snowflake or other non-UUID key; the
+   * returned conversation `.id` is always a UUID suitable for web connect.
+   */
+  bindChannelThread(
+    channelThreadId: string,
+    dotId: string,
+    title: string,
+  ): Conversation {
+    const id = toIntelligenceThreadId(channelThreadId);
+    const channelKey = id === channelThreadId ? null : channelThreadId;
+    const existing = this.findThread(channelThreadId);
+    if (existing) {
+      if (existing.id !== id)
+        this.rewriteThreadPrimaryKey(
+          existing.id,
+          id,
+          channelKey ?? existing.id,
+        );
+      if (this.requireThread(id).title !== title)
+        return this.setThreadTitle(id, title);
+      return this.requireThread(id);
+    }
+    return this.bindThread(id, dotId, title, 'channel', channelKey);
+  }
+  /** Correct a channel bind title once the provider-specific agent runs. */
+  setThreadTitle(id: string, title: string): Conversation {
+    const thread = this.requireThread(id);
+    if (thread.title === title) return thread;
+    this.db
+      .prepare('UPDATE thread_bindings SET title=? WHERE id=? AND ownerId=?')
+      .run(title, id, this.ownerId);
+    return { ...thread, title };
+  }
+  findThread(idOrChannelKey: string): Conversation | undefined {
+    const intelligenceId = toIntelligenceThreadId(idOrChannelKey);
+    return this.conversations().find(
+      (thread) =>
+        thread.id === idOrChannelKey ||
+        thread.id === intelligenceId ||
+        thread.channelKey === idOrChannelKey,
+    );
+  }
   requireThread(id: string, dotId?: string): Conversation {
-    const thread = this.conversations().find((thread) => thread.id === id);
+    const thread = this.findThread(id);
     if (!thread || (dotId && thread.dotId !== dotId))
       throw new Error('Conversation does not belong to this Dot and owner.');
     return thread;
+  }
+  private mapConversation(row: Record<string, unknown>): Conversation {
+    const surface =
+      row.surface === 'channel' || row.surface === 'page' ? row.surface : 'web';
+    return {
+      id: String(row.id),
+      dotId: String(row.dotId),
+      ownerId: String(row.ownerId),
+      title: String(row.title),
+      createdAt: Number(row.createdAt),
+      learningContainerId:
+        typeof row.learningContainerId === 'string'
+          ? row.learningContainerId
+          : null,
+      surface,
+      channelKey: typeof row.channelKey === 'string' ? row.channelKey : null,
+    };
+  }
+  /**
+   * Rewrite legacy channel bindings that stored Discord snowflakes (or other
+   * non-UUID keys) as the primary key into Intelligence UUID ids + channelKey.
+   */
+  private migrateChannelThreadIds() {
+    const rows = this.db
+      .prepare(
+        'SELECT id, surface, channelKey FROM thread_bindings WHERE ownerId=?',
+      )
+      .all(this.ownerId) as Array<{
+      id: string;
+      surface: string;
+      channelKey: string | null;
+    }>;
+    for (const row of rows) {
+      if (isIntelligenceThreadId(row.id)) continue;
+      // Only remap known channel rows (or rows that still carry a channel title).
+      if (row.surface !== 'channel' && !row.channelKey) continue;
+      const nextId = toIntelligenceThreadId(row.id);
+      if (nextId === row.id) continue;
+      this.rewriteThreadPrimaryKey(row.id, nextId, row.channelKey ?? row.id);
+    }
+  }
+  private rewriteThreadPrimaryKey(
+    fromId: string,
+    toId: string,
+    channelKey: string,
+  ) {
+    this.db.exec('BEGIN');
+    try {
+      const current = this.db
+        .prepare('SELECT * FROM thread_bindings WHERE id=?')
+        .get(fromId) as Record<string, unknown> | undefined;
+      if (!current) {
+        this.db.exec('ROLLBACK');
+        return;
+      }
+      const clash = this.db
+        .prepare('SELECT id FROM thread_bindings WHERE id=?')
+        .get(toId);
+      if (clash) {
+        this.db.prepare('DELETE FROM thread_bindings WHERE id=?').run(fromId);
+      } else {
+        this.db
+          .prepare(
+            `INSERT INTO thread_bindings
+              (id, dotId, ownerId, title, createdAt, learningContainerId, surface, channelKey)
+             VALUES (?, ?, ?, ?, ?, ?, 'channel', ?)`,
+          )
+          .run(
+            toId,
+            String(current.dotId),
+            String(current.ownerId),
+            String(current.title),
+            Number(current.createdAt),
+            typeof current.learningContainerId === 'string'
+              ? current.learningContainerId
+              : null,
+            channelKey,
+          );
+        this.db.prepare('DELETE FROM thread_bindings WHERE id=?').run(fromId);
+      }
+      for (const [table, column] of THREAD_ID_TABLES) {
+        this.db
+          .prepare(`UPDATE ${table} SET ${column}=? WHERE ${column}=?`)
+          .run(toId, fromId);
+      }
+      if (
+        this.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='page_threads'",
+          )
+          .get()
+      )
+        this.db
+          .prepare('UPDATE page_threads SET threadId=? WHERE threadId=?')
+          .run(toId, fromId);
+      if (
+        this.db
+          .prepare(
+            "SELECT name FROM sqlite_master WHERE type='table' AND name='page_reviews'",
+          )
+          .get()
+      )
+        this.db
+          .prepare('UPDATE page_reviews SET threadId=? WHERE threadId=?')
+          .run(toId, fromId);
+      this.db.exec('COMMIT');
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   bindTask(taskId: string, threadId: string) {
     this.requireThread(threadId);

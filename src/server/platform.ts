@@ -67,7 +67,8 @@ export class Platform {
         config,
         ownerId: workspace.ownerId,
         paused: () => store.settings().paused,
-        agent: () => new DotAgent(store, workspace, config, dotId, true),
+        agent: () =>
+          new DotAgent(store, workspace, config, dotId, 'Slack conversation'),
       });
       channels.push(slack);
     }
@@ -81,7 +82,14 @@ export class Platform {
           config,
           ownerId: workspace.ownerId,
           paused: () => store.settings().paused,
-          agent: () => new DotAgent(store, workspace, config, dotId, true),
+          agent: () =>
+            new DotAgent(
+              store,
+              workspace,
+              config,
+              dotId,
+              'Discord conversation',
+            ),
         }),
       );
     }
@@ -161,6 +169,29 @@ export class Platform {
       );
     }
     return this.workspace.bindThread(id, dotId, title);
+  }
+  /**
+   * Ensure an Intelligence thread exists for a bound conversation so web
+   * `connectAgent` succeeds. Channel binds historically stored Discord
+   * snowflakes without creating an Intelligence thread; after UUID remapping
+   * the row is connectable but may still need a platform create.
+   */
+  async ensureConversation(threadId: string) {
+    this.requireReady();
+    const thread = this.workspace.requireThread(threadId);
+    try {
+      await this.intelligence!.getOrCreateThread({
+        threadId: thread.id,
+        userId: this.workspace.ownerId,
+        agentId: thread.dotId,
+        name: thread.title,
+      });
+    } catch {
+      throw new Error(
+        'Intelligence could not open this conversation. Check the runtime key and connection.',
+      );
+    }
+    return thread;
   }
   async history(threadId: string): Promise<string> {
     this.requireReady();

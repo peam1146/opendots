@@ -137,6 +137,26 @@ export function workspaceRoutes(platform: Platform, voice: VoiceService) {
       201,
     );
   });
+  app.post('/conversations/:id/ensure', async (c) => {
+    if (platform.setup().missing.length)
+      return c.json(
+        { error: `Setup required: ${platform.setup().missing.join(', ')}.` },
+        503,
+      );
+    try {
+      return c.json(await platform.ensureConversation(c.req.param('id')));
+    } catch (error) {
+      return c.json(
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : 'Conversation could not be prepared.',
+        },
+        400,
+      );
+    }
+  });
   app.get('/conversations/:id/capture', (c) =>
     c.json(platform.workspace.capture(c.req.param('id'))),
   );
