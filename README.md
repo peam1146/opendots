@@ -170,11 +170,17 @@ Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configur
 
 See [Setup](docs/SETUP.md) for configuration, Slack, Discord, calls, the browser service, and Docker.
 
-### Container image (Softnetics GHCR)
+### Container images (Softnetics GHCR)
 
-Version tags matching `v*` (and manual `workflow_dispatch`) build `Dockerfile` target `app` and publish to **`ghcr.io/softnetics/opendots`** via [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml). Auth uses the workflow `GITHUB_TOKEN` with `packages:write` (repo is `softnetics/opendots`; no extra PAT secret). Image tags include the git tag (`v1.0.0`), the semver without `v` (`1.0.0`), `sha-<short>`, and `latest` on version tags. Platform: `linux/amd64`.
+Version tags matching `v*` (and manual `workflow_dispatch`) publish `linux/amd64` images with the workflow `GITHUB_TOKEN` (`packages:write`; no extra PAT secret):
 
-Softnetics GitOps should pin the published digest (e.g. `ghcr.io/softnetics/opendots@sha256:…`) after the workflow finishes, using the existing Softnetics `ghcr-pull-secret`.
+| Image | Workflow | Notes |
+| --- | --- | --- |
+| `ghcr.io/softnetics/opendots` | [publish-image.yml](.github/workflows/publish-image.yml) | App (`Dockerfile` target `app`). Tags: git tag, semver, `sha-<short>`, `latest` on `v*`. |
+| `ghcr.io/softnetics/opendots-computer` | [publish-computer-images.yml](.github/workflows/publish-computer-images.yml) | OpenBot computer at pin `b6932d3`. Tags include `b6932d3` plus semver/sha. |
+| `ghcr.io/softnetics/opendots-supervisor` | same | Hardened supervisor (`b6932d3-dot-auth`). Must stay paired with the computer image from the same OpenBot pin / publish run. |
+
+Softnetics GitOps should pin published digests from each workflow's Actions summary (e.g. `ghcr.io/softnetics/opendots@sha256:…`), using the existing Softnetics `ghcr-pull-secret`. For computers, set supervisor env `COMPUTER_IMAGE` to the computer digest. See [deployment/computers](deployment/computers/README.md).
 
 ## Features
 
