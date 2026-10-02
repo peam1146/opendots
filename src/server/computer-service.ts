@@ -190,13 +190,34 @@ export class ComputerService {
     if (state.botId !== id || state.container !== expected)
       throw new Error('Computer identity mismatch.');
     const access = this.accessHost();
+    // Option B: never fall back to DinD container DNS. ensure may return a full
+    // access-host URL while listOwned only returns `port`; both must resolve to
+    // http://{COMPUTER_ACCESS_HOST}:{publishedPort}. Missing port after ensure
+    // usually means a stale pre-option-B container — Start again to recreate.
+    if (access) {
+      if (!state.port)
+        throw new Error(
+          'Computer publish port is missing. Start the computer again so the supervisor can publish COMPUTER_ACCESS_HOST ports.',
+        );
+      const url = new URL(state.url ?? `http://${access}:${state.port}`);
+      if (
+        url.protocol !== 'http:' ||
+        url.username ||
+        url.password ||
+        url.pathname !== '/' ||
+        url.search ||
+        url.hash ||
+        url.hostname !== access ||
+        url.port !== String(state.port)
+      )
+        throw new Error('Computer endpoint is not bound to this Dot.');
+      return url.origin;
+    }
     const url = new URL(
       state.url ??
-        (state.port && access
-          ? `http://${access}:${state.port}`
-          : state.port
-            ? `http://127.0.0.1:${state.port}`
-            : `http://${expected}:4100`),
+        (state.port
+          ? `http://127.0.0.1:${state.port}`
+          : `http://${expected}:4100`),
     );
     const network =
       url.hostname === expected.toLowerCase() && url.port === '4100';
@@ -205,11 +226,6 @@ export class ComputerService {
       !!state.port &&
       url.port === String(state.port) &&
       new URL(this.config.computerSupervisorUrl!).hostname === '127.0.0.1';
-    const published =
-      !!access &&
-      !!state.port &&
-      url.hostname === access &&
-      url.port === String(state.port);
     if (
       url.protocol !== 'http:' ||
       url.username ||
@@ -217,7 +233,7 @@ export class ComputerService {
       url.pathname !== '/' ||
       url.search ||
       url.hash ||
-      (!network && !local && !published)
+      (!network && !local)
     )
       throw new Error('Computer endpoint is not bound to this Dot.');
     return url.origin;
@@ -257,7 +273,26 @@ export class ComputerService {
         ),
       );
       return { ...base, state: 'running', control };
-    } catch {
+    } catch (error) {
+      // Prefer a specific, already-sanitized Error message (allowlist / publish port /
+      // HTTP detail) over the generic unavailable copy. When option B is configured and
+      // the computer HTTP call fails, point at Service DNS / published ports.
+      const detail =
+        error instanceof Error ? clipSupervisorDetail(error.message) : '';
+      const known =
+        detail &&
+        (/^Computer (service returned|response exceeded|request was cancelled|publish port|endpoint|identity)/i.test(
+          detail,
+        ) ||
+          /Invalid computer (access host|namespace)/i.test(detail));
+      if (known) return { ...base, state: 'unavailable', error: detail };
+      const access = this.config.computerAccessHost?.trim();
+      if (access && /unavailable or returned an invalid response/i.test(detail))
+        return {
+          ...base,
+          state: 'unavailable',
+          error: `Computer is running but unreachable via ${access}. Confirm the Service exposes the published port (COMPUTER_PUBLISH_PORT_BASE/SPAN) and COMPUTER_ACCESS_HOST matches on app and supervisor.`,
+        };
       return {
         ...base,
         state: 'unavailable',

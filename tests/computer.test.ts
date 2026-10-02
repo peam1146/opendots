@@ -455,6 +455,79 @@ it('builds access-host URLs from published ports when ensure omits url', async (
   expect(f.calls.at(-1)?.url).toBe(`http://${access}:44210/read`);
 });
 
+it('does not fall back to DinD container DNS when COMPUTER_ACCESS_HOST is set', async () => {
+  const f = fixture();
+  const access = 'bigc-opendots-computer-supervisor';
+  const config = {
+    ...f.config,
+    computerSupervisorUrl: `http://${access}:4300`,
+    computerAccessHost: access,
+  };
+  const transport: typeof fetch = async (input) => {
+    if (String(input).endsWith('/computers'))
+      return Response.json({
+        computers: [
+          {
+            botId: f.id,
+            container: `opendots-computer-${f.id}`,
+            status: 'running',
+            // No published port — pre-option-B or DinD list omission.
+          },
+        ],
+      });
+    return Response.json({ text: 'result' });
+  };
+  const service = new ComputerService(
+    f.workspace,
+    config,
+    () => false,
+    transport,
+  );
+  await expect(service.status(f.id)).resolves.toMatchObject({
+    state: 'unavailable',
+    error: expect.stringMatching(/publish port is missing/i),
+  });
+});
+
+it('points at Service publish ports when option B /control is unreachable', async () => {
+  const f = fixture();
+  const access = 'bigc-opendots-computer-supervisor';
+  const config = {
+    ...f.config,
+    computerSupervisorUrl: `http://${access}:4300`,
+    computerAccessHost: access,
+  };
+  const transport: typeof fetch = async (input) => {
+    const url = String(input);
+    if (url.endsWith('/computers'))
+      return Response.json({
+        computers: [
+          {
+            botId: f.id,
+            container: `opendots-computer-${f.id}`,
+            status: 'running',
+            port: 44107,
+            url: `http://${access}:44107`,
+          },
+        ],
+      });
+    if (url.endsWith('/control')) throw new TypeError('fetch failed');
+    return Response.json({ text: 'result' });
+  };
+  const service = new ComputerService(
+    f.workspace,
+    config,
+    () => false,
+    transport,
+  );
+  await expect(service.status(f.id)).resolves.toMatchObject({
+    state: 'unavailable',
+    error: expect.stringMatching(
+      /unreachable via bigc-opendots-computer-supervisor/i,
+    ),
+  });
+});
+
 it('gives agents a safe recovery instruction for stale browser or control conflicts', async () => {
   const f = fixture();
   f.handle(async () =>
