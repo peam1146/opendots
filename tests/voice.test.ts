@@ -23,6 +23,7 @@ function fixture() {
     voiceName: 'marin',
     runtimeUrl: '',
     slackUsers: [],
+    discordUsers: [],
   };
   const turn = vi.fn(
     async (_thread: string, _prompt: string, _signal: AbortSignal) =>
@@ -50,6 +51,7 @@ function fixture() {
         model: true,
         browser: false,
         slack: 'not_configured',
+        discord: 'not_configured',
         missing: [],
       }),
     },

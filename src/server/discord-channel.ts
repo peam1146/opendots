@@ -4,6 +4,7 @@ import {
   type IncomingMessage,
   type Thread,
 } from '@copilotkit/channels';
+import { discord } from '@copilotkit/channels/discord';
 import {
   reportChannelFailure,
   safeFailure,
@@ -11,47 +12,55 @@ import {
 } from './channel-safety.js';
 import type { PlatformConfig } from './platform-config.js';
 
-export { reportChannelFailure, safeFailure } from './channel-safety.js';
+export type DiscordConfig = Pick<
+  PlatformConfig,
+  | 'discordChannel'
+  | 'discordBotToken'
+  | 'discordAppId'
+  | 'discordGuild'
+  | 'discordUsers'
+>;
 
-type SlackConfig = Pick<PlatformConfig, 'slackTeam' | 'slackUsers'>;
-export function slackIdentity(
-  context: ChannelIdentityContext,
-  config: SlackConfig,
-  ownerId: string,
-) {
-  if (
-    context.provider !== 'slack' ||
-    context.tenant.id !== config.slackTeam ||
-    context.actor.kind !== 'human' ||
-    !config.slackUsers.includes(context.actor.id)
-  )
-    return null;
-  return { id: ownerId, name: 'OpenDots owner' };
-}
 type Turn = {
   thread: Pick<Thread, 'runAgent' | 'post' | 'subscribe' | 'isSubscribed'>;
   message: IncomingMessage;
 };
-export function slackHandlers(options: {
-  config: SlackConfig;
+
+export function discordIdentity(
+  context: ChannelIdentityContext,
+  config: DiscordConfig,
+  ownerId: string,
+) {
+  if (
+    context.provider !== 'discord' ||
+    context.tenant.id !== config.discordGuild ||
+    context.actor.kind !== 'human' ||
+    !config.discordUsers.includes(context.actor.id)
+  )
+    return null;
+  return { id: ownerId, name: 'OpenDots owner' };
+}
+
+export function discordHandlers(options: {
+  config: DiscordConfig;
   ownerId: string;
   paused: () => boolean;
   report?: ChannelFailureReport;
 }) {
   const report = options.report ?? reportChannelFailure;
   const eligible = ({ message }: Turn) =>
-    message.platform === 'slack' &&
+    message.platform === 'discord' &&
     message.user?.id === options.ownerId &&
     message.actor.kind === 'human' &&
-    options.config.slackUsers.includes(message.actor.id) &&
+    options.config.discordUsers.includes(message.actor.id) &&
     (message.operation?.kind ?? 'created') === 'created';
   async function notice(thread: Turn['thread'], text: string) {
     try {
       await thread.post(text);
     } catch (error) {
       const safe = safeFailure(error);
-      report('Slack notice failed', [safe]);
-      throw new Error(`Slack notice failed: ${safe}`, {
+      report('Discord notice failed', [safe]);
+      throw new Error(`Discord notice failed: ${safe}`, {
         // eslint-disable-next-line preserve-caught-error -- Raw provider causes can expose credentials through SDK logging.
         cause: safeFailure(error),
       });
@@ -75,7 +84,7 @@ export function slackHandlers(options: {
         );
       } catch (postError) {
         const replyError = safeFailure(postError);
-        report('Slack agent run and error reply failed', [
+        report('Discord agent run and error reply failed', [
           runError,
           replyError,
         ]);
@@ -84,12 +93,12 @@ export function slackHandlers(options: {
             new Error(`Agent run: ${runError}`),
             new Error(`Error reply: ${replyError}`),
           ],
-          'Slack agent run and error reply failed',
+          'Discord agent run and error reply failed',
           // eslint-disable-next-line preserve-caught-error -- Retain only the safe cause; the SDK may log thrown errors.
           { cause: safeFailure(postError) },
         );
       }
-      report('Slack agent run failed; error reply posted', [runError]);
+      report('Discord agent run failed; error reply posted', [runError]);
     }
   }
   return {
@@ -102,7 +111,7 @@ export function slackHandlers(options: {
       try {
         await turn.thread.subscribe();
       } catch (error) {
-        report('Slack thread subscription failed; answering mention', [
+        report('Discord thread subscription failed; answering mention', [
           safeFailure(error),
         ]);
       }
@@ -115,8 +124,8 @@ export function slackHandlers(options: {
         subscribed = await turn.thread.isSubscribed();
       } catch (error) {
         const safe = safeFailure(error);
-        report('Slack subscription lookup failed', [safe]);
-        throw new Error(`Slack subscription lookup failed: ${safe}`, {
+        report('Discord subscription lookup failed', [safe]);
+        throw new Error(`Discord subscription lookup failed: ${safe}`, {
           // eslint-disable-next-line preserve-caught-error -- Raw provider causes can expose credentials through SDK logging.
           cause: safeFailure(error),
         });
@@ -125,21 +134,37 @@ export function slackHandlers(options: {
     },
   };
 }
-export function createSlackChannel(options: {
+
+export function createDiscordChannel(options: {
   name: string;
   agent: NonNullable<Parameters<typeof createChannel>[0]['agent']>;
-  config: SlackConfig;
+  config: DiscordConfig;
   ownerId: string;
   paused: () => boolean;
 }) {
+  if (
+    !options.config.discordBotToken ||
+    !options.config.discordAppId ||
+    !options.config.discordGuild
+  )
+    throw new Error(
+      'Discord channel requires DISCORD_BOT_TOKEN, DISCORD_APP_ID, and DISCORD_GUILD_ID.',
+    );
   const channel = createChannel({
     name: options.name,
     agent: options.agent,
+    adapters: [
+      discord({
+        botToken: options.config.discordBotToken,
+        appId: options.config.discordAppId,
+        guildId: options.config.discordGuild,
+      }),
+    ],
     identifyUser: (context) =>
-      slackIdentity(context, options.config, options.ownerId),
+      discordIdentity(context, options.config, options.ownerId),
     store: { concurrency: 'serial' },
   });
-  const handlers = slackHandlers(options);
+  const handlers = discordHandlers(options);
   // Channels dispatches a mention to onMention exclusively, so it is not run twice.
   channel.onMention(handlers.mention);
   channel.onMessage(handlers.message);

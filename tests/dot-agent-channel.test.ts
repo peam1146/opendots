@@ -113,6 +113,7 @@ function fixture(channel = true) {
       runtimeUrl: '',
       voiceName: 'marin',
       slackUsers: [],
+      discordUsers: [],
     },
     dot.id,
     channel,

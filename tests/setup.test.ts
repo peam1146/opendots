@@ -11,6 +11,7 @@ const config: PlatformConfig = {
   runtimeUrl: '',
   voiceName: 'marin',
   slackUsers: [],
+  discordUsers: [],
 };
 it('never claims Slack online without a complete managed channel declaration', () => {
   expect(setupStatus(config, 'online').slack).toBe('not_configured');
@@ -29,6 +30,25 @@ it('never claims Slack online without a complete managed channel declaration', (
     ).slack,
   ).toBe('online');
 });
+it('never claims Discord online without a complete direct adapter declaration', () => {
+  expect(setupStatus(config, 'online').discord).toBe('not_configured');
+  expect(
+    setupStatus({ ...config, discordBotToken: 'token' }, 'online').discord,
+  ).toBe('setup_required');
+  expect(
+    setupStatus(
+      {
+        ...config,
+        discordChannel: 'opendots-discord',
+        discordBotToken: 'token',
+        discordAppId: 'app',
+        discordGuild: 'guild',
+        discordUsers: ['person'],
+      },
+      'online',
+    ).discord,
+  ).toBe('online');
+});
 it('requires Intelligence and model setup and disables voice when either is absent', () => {
   expect(
     setupStatus({
@@ -45,9 +65,18 @@ it('reports activation failure until the SDK recovers online', () => {
     slackChannel: 'support',
     slackTeam: 'team',
     slackUsers: ['owner'],
+    discordChannel: 'opendots-discord',
+    discordBotToken: 'token',
+    discordAppId: 'app',
+    discordGuild: 'guild',
+    discordUsers: ['person'],
   };
   expect(setupStatus(declared, 'offline', true).slack).toBe(
     'activation_failed',
   );
+  expect(setupStatus(declared, 'offline', true).discord).toBe(
+    'activation_failed',
+  );
   expect(setupStatus(declared, 'online', true).slack).toBe('online');
+  expect(setupStatus(declared, 'online', true).discord).toBe('online');
 });

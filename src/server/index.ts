@@ -47,6 +47,15 @@ const config: PlatformConfig = {
     .map((value) => value.trim())
     .filter(Boolean),
   slackDotId: process.env.SLACK_DOT_ID || undefined,
+  discordChannel: process.env.DISCORD_CHANNEL_NAME,
+  discordBotToken: process.env.DISCORD_BOT_TOKEN,
+  discordAppId: process.env.DISCORD_APP_ID,
+  discordGuild: process.env.DISCORD_GUILD_ID,
+  discordUsers: (process.env.DISCORD_USER_IDS ?? '')
+    .split(',')
+    .map((value) => value.trim())
+    .filter(Boolean),
+  discordDotId: process.env.DISCORD_DOT_ID || undefined,
   runtimeUrl: `http://${host === '::1' ? '[::1]' : '127.0.0.1'}:${port}/api/copilotkit`,
   ownerToken,
 };
@@ -106,10 +115,9 @@ const server = serve({ fetch: app.fetch, hostname: host, port }, (info) => {
   void platform
     .start()
     .catch((error) =>
-      reportChannelFailure(
-        'Slack Channels activation failed; check setup status',
-        [safeFailure(error)],
-      ),
+      reportChannelFailure('Channels activation failed; check setup status', [
+        safeFailure(error),
+      ]),
     );
 });
 const shutdown = createShutdown({

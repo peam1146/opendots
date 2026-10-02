@@ -7,13 +7,18 @@ import {
   createCopilotHonoHandler,
   type CopilotHonoApp,
 } from '@copilotkit/runtime/v2';
+import { createDiscordChannel } from './discord-channel.js';
 import { createSlackChannel } from './slack-channel.js';
 export { slackIdentity } from './slack-channel.js';
 import { Store } from './store.js';
 import { WorkspaceStore } from './workspace.js';
 import { DotAgent } from './dot-agent.js';
 import { runThreadTurn } from './headless.js';
-import { setupStatus, type PlatformConfig } from './platform-config.js';
+import {
+  discordConfigured,
+  setupStatus,
+  type PlatformConfig,
+} from './platform-config.js';
 import { validateRuntimeScope } from './runtime-scope.js';
 import { learningSelector } from './learning.js';
 export class Platform {
@@ -37,14 +42,20 @@ export class Platform {
       return this.intelligence!;
     });
     if (!config.intelligenceKey) return;
+    const defaultDotId = workspace.dots()[0]?.id;
+    const channelDotIds = [
+      config.slackChannel && config.slackTeam && config.slackUsers.length
+        ? (config.slackDotId ?? defaultDotId)
+        : undefined,
+      discordConfigured(config)
+        ? (config.discordDotId ?? defaultDotId)
+        : undefined,
+    ].filter((id): id is string => !!id);
     this.intelligence = new CopilotKitIntelligence({
       apiKey: config.intelligenceKey,
       apiUrl: config.intelligenceApiUrl,
       wsUrl: config.intelligenceWsUrl,
-      getLearningContainerId: learningSelector(
-        workspace,
-        config.slackDotId ?? workspace.dots()[0]?.id,
-      ),
+      getLearningContainerId: learningSelector(workspace, channelDotIds),
     });
     const channels = [];
     if (config.slackChannel && config.slackTeam && config.slackUsers.length) {
@@ -59,6 +70,20 @@ export class Platform {
         agent: () => new DotAgent(store, workspace, config, dotId, true),
       });
       channels.push(slack);
+    }
+    if (discordConfigured(config)) {
+      const dotId = config.discordDotId ?? workspace.dots()[0].id;
+      if (!workspace.dot(dotId))
+        throw new Error('DISCORD_DOT_ID does not identify an existing Dot.');
+      channels.push(
+        createDiscordChannel({
+          name: config.discordChannel!,
+          config,
+          ownerId: workspace.ownerId,
+          paused: () => store.settings().paused,
+          agent: () => new DotAgent(store, workspace, config, dotId, true),
+        }),
+      );
     }
     const runtime = new CopilotRuntime({
       intelligence: this.intelligence,
@@ -85,10 +110,16 @@ export class Platform {
     });
   }
   setup() {
+    const declaredChannels =
+      !!(
+        this.config.slackChannel &&
+        this.config.slackTeam &&
+        this.config.slackUsers.length
+      ) || discordConfigured(this.config);
     return setupStatus(
       this.config,
       this.handler?.channels?.status().overall ??
-        (this.config.slackChannel ? 'setup_required' : 'not_configured'),
+        (declaredChannels ? 'setup_required' : 'not_configured'),
       this.channelStartupFailed,
     );
   }

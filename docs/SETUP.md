@@ -38,6 +38,8 @@ Edit `.env` on the server and restart after changes:
 | `OWNER_TOKEN`                                 | Application access token; required for external bindings  |
 | `APP_ORIGIN`                                  | Exact browser origin when using a proxy or custom domain  |
 
+Optional Slack and Discord channel variables are documented in [Slack](#slack) and [Discord](#discord). Leave them empty to keep those integrations off.
+
 The model environment variable names follow the configured provider adapter. Provider credentials belong in `.env`, not client-side variables or source code. Conversation history lives in the configured Intelligence project; copying the SQLite file alone does not back up that history.
 
 ## Pages and page conversations
@@ -106,6 +108,50 @@ This template maps permitted Slack users to the single OpenDots owner. Replies a
 From an allowed user, mention the bot and verify a response in the same Slack thread. Reply in that thread and confirm continuity. Check that an unrelated thread and an unapproved user cannot invoke it. Pause the assistant in OpenDots and verify that a permitted request receives a paused notice. Check Settings & setup for channel connection failures.
 
 Local tests exercise channel behavior with fixtures. A live Slack mention/reply remains unverified until you provision the managed connection and model credentials. [Channels SDK documentation](https://github.com/CopilotKit/channels-sdk) describes extending the adapter and channel behavior.
+
+## Discord
+
+OpenDots uses the **direct** Discord adapter from `@copilotkit/channels` (`import { discord } from '@copilotkit/channels/discord'`), not a custom webhook bridge. Managed Intelligence Discord support is not available yet (CopilotKit documents it as coming soon); the direct adapter already ships and OpenDots owns the Discord Gateway connection in-process. Intelligence still owns Channel lifecycle through `CopilotRuntime` — there is no public `channel.start()`.
+
+This is intentionally different from Slack in this template: Slack uses a managed Intelligence channel (credentials live in Intelligence), while Discord credentials live in the application server environment.
+
+### Create a Discord application
+
+1. Open the [Discord Developer Portal](https://discord.com/developers/applications) and create an application.
+2. Under **Bot**, create a bot and copy the **Bot Token** (`DISCORD_BOT_TOKEN`). Reset the token if it was ever exposed.
+3. Copy the application's **Application ID** from **General Information** (`DISCORD_APP_ID`).
+4. Enable these **Privileged Gateway Intents** on the Bot page (required by the adapter):
+   - **Message Content Intent** — without it, message bodies arrive empty.
+   - **Server Members Intent** — required for member lookup / Gateway login with this adapter.
+5. Under **OAuth2 → URL Generator**, select scope `bot` (and `applications.commands` if you want slash commands). Grant the bot permission to read and send messages in the channels you will use, then invite it into your guild with the generated URL.
+6. Enable Developer Mode in the Discord client, then copy the **Server ID** (guild) and your **User ID** for the allowlists below.
+
+The adapter connects over the Discord Gateway (WebSocket). No public webhook URL is required.
+
+### Connect a specialist
+
+Configure the application server's `.env` alongside its Intelligence and model credentials:
+
+```dotenv
+DISCORD_CHANNEL_NAME=opendots-discord
+DISCORD_BOT_TOKEN=REPLACE_WITH_BOT_TOKEN
+DISCORD_APP_ID=REPLACE_WITH_APPLICATION_ID
+DISCORD_GUILD_ID=REPLACE_WITH_GUILD_ID
+DISCORD_USER_IDS=REPLACE_WITH_YOUR_USER_ID
+DISCORD_DOT_ID=REPLACE_WITH_DOT_ID
+```
+
+`DISCORD_CHANNEL_NAME` is the project-unique Intelligence Channel name declared in code, not a Discord `#channel` name. Keep it distinct from `SLACK_CHANNEL_NAME` if both are configured. `DISCORD_GUILD_ID` and the comma-separated `DISCORD_USER_IDS` restrict who may invoke the specialist (guild DMs and other guilds are denied). `DISCORD_DOT_ID` selects an existing Dot; if omitted, it defaults to the initial Dot.
+
+Restart OpenDots after changing environment settings and inspect Discord status in Settings & setup. Channel activation must complete before trying a message. Mention the installed bot in a guild channel it can access; subsequent messages in that followed thread go to the same specialist. Unrelated threads, bot events, edits, deletions, and users outside the allowlist do not start agent runs.
+
+This template maps permitted Discord users to the single OpenDots owner. Replies are visible to the Discord conversation's audience, so choose the specialist's Space access and permitted tools accordingly. This is not a multi-user identity model.
+
+### Verify your deployment
+
+From an allowed user, mention the bot and verify a response in the same Discord thread (or Discord's thread equivalent). Reply in that thread and confirm continuity. Check that an unrelated thread and an unapproved user cannot invoke it. Pause the assistant in OpenDots and verify that a permitted request receives a paused notice. Check Settings & setup for channel connection failures.
+
+Local tests exercise Discord allowlisting and handler behavior with fixtures. A live Discord mention/reply remains unverified until you provision bot credentials, privileged intents, and model credentials. See [direct provider adapters](https://docs.copilotkit.ai/reference/channels/sdk/direct-adapters) for the official Discord adapter contract.
 
 ## Calls
 
