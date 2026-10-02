@@ -174,11 +174,11 @@ See [Setup](docs/SETUP.md) for configuration, Slack, Discord, calls, the browser
 
 Version tags matching `v*` (and manual `workflow_dispatch`) publish `linux/amd64` images with the workflow `GITHUB_TOKEN` (`packages:write`; no extra PAT secret):
 
-| Image | Workflow | Notes |
-| --- | --- | --- |
-| `ghcr.io/softnetics/opendots` | [publish-image.yml](.github/workflows/publish-image.yml) | App (`Dockerfile` target `app`). Tags: git tag, semver, `sha-<short>`, `latest` on `v*`. |
-| `ghcr.io/softnetics/opendots-computer` | [publish-computer-images.yml](.github/workflows/publish-computer-images.yml) | OpenBot computer at pin `b6932d3`. Tags include `b6932d3` plus semver/sha. |
-| `ghcr.io/softnetics/opendots-supervisor` | same | Hardened supervisor (`b6932d3-dot-auth`). Must stay paired with the computer image from the same OpenBot pin / publish run. |
+| Image                                    | Workflow                                                                     | Notes                                                                                                                       |
+| ---------------------------------------- | ---------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
+| `ghcr.io/softnetics/opendots`            | [publish-image.yml](.github/workflows/publish-image.yml)                     | App (`Dockerfile` target `app`). Tags: git tag, semver, `sha-<short>`, `latest` on `v*`.                                    |
+| `ghcr.io/softnetics/opendots-computer`   | [publish-computer-images.yml](.github/workflows/publish-computer-images.yml) | OpenBot computer at pin `b6932d3`. Tags include `b6932d3` plus semver/sha.                                                  |
+| `ghcr.io/softnetics/opendots-supervisor` | same                                                                         | Hardened supervisor (`b6932d3-dot-auth`). Must stay paired with the computer image from the same OpenBot pin / publish run. |
 
 Softnetics GitOps should pin published digests from each workflow's Actions summary (e.g. `ghcr.io/softnetics/opendots@sha256:…`), using the existing Softnetics `ghcr-pull-secret`. For computers, set supervisor env `COMPUTER_IMAGE` to the computer digest. See [deployment/computers](deployment/computers/README.md).
 
