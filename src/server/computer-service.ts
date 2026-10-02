@@ -23,6 +23,27 @@ const controlSchema = z.object({
   resumeSnapshotRequired: z.boolean(),
   request: z.object({ id: z.string(), status: z.string() }).optional(),
 });
+/** Ensure may pull COMPUTER_IMAGE on a cold DinD before create+health; allow that budget. */
+const ENSURE_DEADLINE_MS = 580_000;
+/** Bound supervisor error text so raw Docker/registry noise does not flood the UI. */
+function clipSupervisorDetail(detail: string, max = 280): string {
+  const trimmed = detail.replace(/\s+/g, ' ').trim();
+  return trimmed.length > max ? `${trimmed.slice(0, max - 1)}…` : trimmed;
+}
+/** Prefer the supervisor's `{ error }` body over a bare status code. */
+function computerServiceFailure(status: number, body: string): string {
+  let detail = '';
+  try {
+    const parsed = JSON.parse(body) as { error?: unknown };
+    if (typeof parsed.error === 'string') detail = parsed.error;
+  } catch {
+    // Non-JSON failures stay status-only.
+  }
+  detail = clipSupervisorDetail(detail);
+  return detail
+    ? `Computer service returned HTTP ${status}: ${detail}`
+    : `Computer service returned HTTP ${status}.`;
+}
 export class ComputerService {
   constructor(
     private workspace: WorkspaceStore,
@@ -67,9 +88,10 @@ export class ComputerService {
     body: unknown | undefined,
     signal?: AbortSignal,
     dotId?: string,
+    deadlineMs = this.deadlineMs,
   ): Promise<unknown> {
     const controller = new AbortController();
-    const timeout = setTimeout(() => controller.abort(), this.deadlineMs);
+    const timeout = setTimeout(() => controller.abort(), deadlineMs);
     const combined = signal
       ? AbortSignal.any([signal, controller.signal])
       : controller.signal;
@@ -89,8 +111,6 @@ export class ComputerService {
         throw new Error(
           'Computer service returned HTTP 409: refresh the browser with computer_snapshot before retrying. If the owner has control, wait for them to release it; do not bypass takeover.',
         );
-      if (!response.ok)
-        throw new Error(`Computer service returned HTTP ${response.status}.`);
       if (!response.body)
         throw new Error('Computer service returned an empty response.');
       const reader = response.body.getReader();
@@ -114,6 +134,8 @@ export class ComputerService {
         this.config.computerSupervisorToken?.trim(),
       ])
         if (secret) text = text.split(secret).join('[redacted]');
+      if (!response.ok)
+        throw new Error(computerServiceFailure(response.status, text));
       return JSON.parse(text);
     } catch (error) {
       if (combined.aborted)
@@ -133,12 +155,19 @@ export class ComputerService {
       clearTimeout(timeout);
     }
   }
-  private supervisor(path: string, body?: unknown, signal?: AbortSignal) {
+  private supervisor(
+    path: string,
+    body?: unknown,
+    signal?: AbortSignal,
+    deadlineMs?: number,
+  ) {
     return this.json(
       `${this.config.computerSupervisorUrl!.replace(/\/$/, '')}${path}`,
       this.config.computerSupervisorToken!.trim(),
       body,
       signal,
+      undefined,
+      deadlineMs,
     );
   }
   private endpoint(id: string, raw: unknown) {
@@ -245,7 +274,15 @@ export class ComputerService {
   async start(id: string) {
     await this.audited(id, 'start', 'owner', async () => {
       this.allowed(id, undefined, 'owner');
-      this.endpoint(id, await this.supervisor(`/computers/${id}/ensure`, {}));
+      this.endpoint(
+        id,
+        await this.supervisor(
+          `/computers/${id}/ensure`,
+          {},
+          undefined,
+          ENSURE_DEADLINE_MS,
+        ),
+      );
     });
     return this.status(id);
   }
