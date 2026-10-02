@@ -3,19 +3,12 @@
 # Image: ghcr.io/softnetics/opendots
 # Build: docker build --target app (linux/amd64)
 #
-# Required repo secrets on peam1146/OpenDots (Settings → Secrets and variables → Actions):
-#   SOFTNETICS_GHCR_TOKEN     Softnetics-capable PAT/classic token with write:packages
-#                             (and read:packages). Without this secret the job fails —
-#                             it will not silently publish only to peam1146.
-#   SOFTNETICS_GHCR_USERNAME  GitHub username that owns the token (defaults to peam1146
-#                             if unset). Must be able to push packages under softnetics.
+# Auth: GITHUB_TOKEN with packages:write (repo is softnetics/opendots).
+# No extra PAT or SOFTNETICS_GHCR_TOKEN secret is required.
 #
 # Softnetics / GitOps: after a successful tag run, pin the digest of
 # ghcr.io/softnetics/opendots:<tag> (e.g. v1.0.0 or 1.0.0), not a floating tag.
 # Cluster pull already uses Softnetics `ghcr-pull-secret`.
-#
-# Optional peam1146 mirror is intentionally omitted: ghcr.io uses one docker login at
-# a time, and Softnetics must remain the primary image Softnetics GitOps consumes.
 
 name: Publish image
 
@@ -37,32 +30,16 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - name: Require Softnetics GHCR write token
-        env:
-          SOFTNETICS_GHCR_TOKEN: ${{ secrets.SOFTNETICS_GHCR_TOKEN }}
-        run: |
-          if [ -z "${SOFTNETICS_GHCR_TOKEN}" ]; then
-            echo "::error::SOFTNETICS_GHCR_TOKEN is missing. Add a Softnetics GHCR write token (PAT/classic with write:packages) as a repository secret on peam1146/OpenDots before this publish can succeed. Primary image is ghcr.io/softnetics/opendots — peam1146 is not a fallback deploy target."
-            exit 1
-          fi
-
-      - name: Resolve Softnetics GHCR username
-        id: softnetics
-        env:
-          SOFTNETICS_GHCR_USERNAME: ${{ secrets.SOFTNETICS_GHCR_USERNAME }}
-        run: |
-          echo "username=${SOFTNETICS_GHCR_USERNAME:-peam1146}" >> "$GITHUB_OUTPUT"
-
       - uses: actions/checkout@v4
 
       - uses: docker/setup-buildx-action@v3
 
-      - name: Log in to Softnetics GHCR
+      - name: Log in to GHCR
         uses: docker/login-action@v3
         with:
           registry: ghcr.io
-          username: ${{ steps.softnetics.outputs.username }}
-          password: ${{ secrets.SOFTNETICS_GHCR_TOKEN }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Docker metadata
         id: meta
