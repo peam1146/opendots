@@ -680,6 +680,10 @@ export function App() {
                       className={`online-dot ${workspace.setup.slack === 'online' ? '' : 'off'}`}
                     />
                     Slack · {workspace.setup.slack.replaceAll('_', ' ')}
+                    <span
+                      className={`online-dot ${workspace.setup.discord === 'online' ? '' : 'off'}`}
+                    />
+                    Discord · {workspace.setup.discord.replaceAll('_', ' ')}
                     <button
                       className="text-button"
                       onClick={() => setDialog({ type: 'settings' })}

@@ -38,11 +38,13 @@ it('reports setup honestly without a standalone agent fallback', () => {
     baseUrl: '',
     voiceName: 'marin',
     slackUsers: [],
+    discordUsers: [],
     runtimeUrl: '',
   });
   expect(status.intelligence).toBe(false);
   expect(status.voice).toBe(false);
   expect(status.slack).toBe('not_configured');
+  expect(status.discord).toBe('not_configured');
   expect(status.missing).toContain('INTELLIGENCE_API_KEY');
 });
 it('rejects stop scope bypasses and misleading prefixes while allowing canonical owned routes', () => {

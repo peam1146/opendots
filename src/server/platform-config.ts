@@ -1,4 +1,5 @@
 import type { SetupStatus } from '../shared/types.js';
+
 export interface PlatformConfig {
   intelligenceKey?: string;
   intelligenceApiUrl?: string;
@@ -19,12 +20,50 @@ export interface PlatformConfig {
   slackTeam?: string;
   slackUsers: string[];
   slackDotId?: string;
+  discordChannel?: string;
+  discordBotToken?: string;
+  discordAppId?: string;
+  discordGuild?: string;
+  discordUsers: string[];
+  discordDotId?: string;
   runtimeUrl: string;
   ownerToken?: string;
 }
+
+/** Complete direct Discord adapter declaration (optional; parallel to managed Slack). */
+export function discordConfigured(
+  config: Pick<
+    PlatformConfig,
+    | 'discordChannel'
+    | 'discordBotToken'
+    | 'discordAppId'
+    | 'discordGuild'
+    | 'discordUsers'
+  >,
+): boolean {
+  return !!(
+    config.discordChannel &&
+    config.discordBotToken &&
+    config.discordAppId &&
+    config.discordGuild &&
+    config.discordUsers.length
+  );
+}
+
+function channelSetupState(
+  declared: boolean,
+  partial: boolean,
+  overall: string,
+  activationFailed: boolean,
+): string {
+  if (!declared) return partial ? 'setup_required' : 'not_configured';
+  if (activationFailed && overall !== 'online') return 'activation_failed';
+  return overall;
+}
+
 export function setupStatus(
   config: PlatformConfig,
-  slack = 'not_configured',
+  overall = 'not_configured',
   activationFailed = false,
 ): SetupStatus {
   const missing = [
@@ -37,19 +76,36 @@ export function setupStatus(
     config.slackTeam &&
     config.slackUsers.length
   );
-  slack = declaredSlack
-    ? activationFailed && slack !== 'online'
-      ? 'activation_failed'
-      : slack
-    : config.slackChannel || config.slackTeam || config.slackUsers.length
-      ? 'setup_required'
-      : 'not_configured';
+  const partialSlack = !!(
+    config.slackChannel ||
+    config.slackTeam ||
+    config.slackUsers.length
+  );
+  const declaredDiscord = discordConfigured(config);
+  const partialDiscord = !!(
+    config.discordChannel ||
+    config.discordBotToken ||
+    config.discordAppId ||
+    config.discordGuild ||
+    config.discordUsers.length
+  );
   return {
     intelligence: !!config.intelligenceKey,
     model: !!(config.apiKey && config.model),
     browser: !!(config.browserUrl && config.browserSecret),
     voice: !!(config.voiceKey && config.voiceModel && !missing.length),
-    slack,
+    slack: channelSetupState(
+      declaredSlack,
+      partialSlack,
+      overall,
+      activationFailed,
+    ),
+    discord: channelSetupState(
+      declaredDiscord,
+      partialDiscord,
+      overall,
+      activationFailed,
+    ),
     missing,
   };
 }

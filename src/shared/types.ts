@@ -107,6 +107,7 @@ export interface SetupStatus {
   browser: boolean;
   voice: boolean;
   slack: string;
+  discord: string;
   missing: string[];
 }
 export interface WorkspaceState {

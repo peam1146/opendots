@@ -30,6 +30,7 @@ function fixture() {
       runtimeUrl: '',
       voiceName: 'marin',
       slackUsers: [],
+      discordUsers: [],
     },
     dot.id,
   );

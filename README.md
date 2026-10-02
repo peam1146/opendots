@@ -2,7 +2,7 @@
 
 # OpenDots
 
-### Always-on AI coworkers that move between text, calls, and Slack.
+### Always-on AI coworkers that move between text, calls, Slack, and Discord.
 
 **An open-source template for persistent AI agents, each with its own computer. Available on Web and Mobile.**
 
@@ -104,6 +104,10 @@ _Connect, talk, mute, minimize, and return to chat. This is a silent screen capt
 
 Mention a Dot through a managed Slack connection using Channels SDK, then continue in its thread. The integration follows [OpenTag](https://github.com/CopilotKit/OpenTag), with an explicit workspace/user allowlist and a selected specialist. See [Slack setup](docs/SETUP.md#slack) to connect your deployment.
 
+### Discord
+
+Mention a Dot through CopilotKit's direct Discord Channels adapter (`@copilotkit/channels/discord`), with an explicit guild/user allowlist and a selected specialist. Discord bot credentials stay on the application server; managed Intelligence Discord is not available yet. See [Discord setup](docs/SETUP.md#discord).
+
 <div align="center">
 
 <table><tr><td>
@@ -114,7 +118,7 @@ https://github.com/user-attachments/assets/27d03a6c-a9e0-4c29-8d96-fafe0fbae20f
 
 </div>
 
-Bring your agents into Slack with [Channels SDK](https://github.com/CopilotKit/channels-sdk). See the [managed Channels documentation](https://docs.copilotkit.ai/intelligence/channels) to connect them through CopilotKit Intelligence.
+Bring your agents into Slack or Discord with [Channels SDK](https://github.com/CopilotKit/channels-sdk). Slack uses [managed Channels](https://docs.copilotkit.ai/intelligence/channels) through CopilotKit Intelligence; Discord uses the [direct Discord adapter](https://docs.copilotkit.ai/reference/channels/sdk/direct-adapters).
 
 ## Architecture
 
@@ -122,13 +126,15 @@ Bring your agents into Slack with [Channels SDK](https://github.com/CopilotKit/c
 
 [AG-UI](https://docs.ag-ui.com/introduction) carries streamed messages, tool calls, and agent state between the backend and CopilotKit components. Computer activity appears inline as the agent works; human-in-the-loop cards pause a tool call for your decision before it continues.
 
-The template uses TanStack AI for model streaming and server-tool execution, CopilotKit's React SDK and runtime, Intelligence for durable Threads, and Channels SDK for Slack. Pages, application metadata, and background-work state are stored separately from conversation history.
+The template uses TanStack AI for model streaming and server-tool execution, CopilotKit's React SDK and runtime, Intelligence for durable Threads, and Channels SDK for Slack (managed) and Discord (direct adapter). Pages, application metadata, and background-work state are stored separately from conversation history.
 
 ```mermaid
 flowchart TB
   Web["Web app: pages, Spaces, Dots, chat"] -->|AG-UI| Runtime[CopilotKit runtime]
   Slack[Slack] <--> Managed[Managed channel connection]
+  Discord[Discord] <--> Direct[Direct Discord adapter]
   Managed <--> Channels[Channels SDK]
+  Direct <--> Channels
   Channels --> Agents[Specialist compute agents]
   Runtime --> Agents
   Agents --> AI[TanStack AI]
@@ -162,7 +168,7 @@ npm run dev
 
 Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configure Dots before connecting services. Add your conversation and model settings to `.env` to start chatting.
 
-See [Setup](docs/SETUP.md) for configuration, Slack, calls, the browser service, and Docker.
+See [Setup](docs/SETUP.md) for configuration, Slack, Discord, calls, the browser service, and Docker.
 
 ## Features
 
@@ -172,6 +178,7 @@ See [Setup](docs/SETUP.md) for configuration, Slack, calls, the browser service,
 | Pages                      | Searchable library, visual editor, slash commands, autosave, and revision checks                                                        |
 | Conversations              | React SDK chat and Threads integration, page-specific conversations, and source links                                                   |
 | Slack                      | Managed Channels SDK declaration with workspace and user allowlists                                                                     |
+| Discord                    | Direct `@copilotkit/channels/discord` adapter with guild and user allowlists                                                            |
 | Calls                      | WebRTC speech, delegated compute, bounded sessions, hangup, and timeline receipts                                                       |
 | Background work            | Scheduled server-side turns in their original conversation, with pause and retry controls                                               |
 | Browser                    | Separate read-only public-page service with page capture and navigation limits                                                          |
@@ -180,7 +187,7 @@ See [Setup](docs/SETUP.md) for configuration, Slack, calls, the browser service,
 | Automatic Learning         | Per-Dot Learning containers, conversation evidence routing, and published-skill delivery; see [setup](docs/SETUP.md#automatic-learning) |
 | Deployment                 | Local Node setup and separate application/browser containers                                                                            |
 
-Local checks cover setup, persistence, permissions, SDK failure handling, and browser isolation. Automated tests use service fixtures. **Live Intelligence, model responses, and page-context chat were verified on September 29, 2026.** Live OpenBot computer browsing, file creation, shell verification, and file persistence across stop/start were also verified locally. Live Realtime speech, call controls, and receipt persistence were verified locally on September 30, 2026. Slack and spoken compute delegation still need connected-service verification. See [recording notes](docs/demos/README.md) for the demonstrated flows and limits.
+Local checks cover setup, persistence, permissions, SDK failure handling, and browser isolation. Automated tests use service fixtures. **Live Intelligence, model responses, and page-context chat were verified on September 29, 2026.** Live OpenBot computer browsing, file creation, shell verification, and file persistence across stop/start were also verified locally. Live Realtime speech, call controls, and receipt persistence were verified locally on September 30, 2026. Slack, Discord, and spoken compute delegation still need connected-service verification. See [recording notes](docs/demos/README.md) for the demonstrated flows and limits.
 
 Automatic Learning routing and skill delivery are configured locally. Cloud schedules, eligible-thread counts, and published-skill delivery still need connected-service verification. Skills require review and publication in Intelligence; existing conversations without a container are not enrolled retroactively.
 
