@@ -110,8 +110,8 @@ export function Chat({
   useEffect(() => {
     if (!isReady) return;
     let active = true;
-    void copilotkit
-      .connectAgent({ agent })
+    void api(`/conversations/${thread.id}/ensure`, 'POST')
+      .then(() => copilotkit.connectAgent({ agent }))
       .then(() => {
         if (active) setLoaded(true);
       })
@@ -124,7 +124,7 @@ export function Chat({
     return () => {
       active = false;
     };
-  }, [agent, copilotkit, isReady]);
+  }, [agent, copilotkit, isReady, thread.id]);
   const send = async (text: string) => {
     if (!text.trim() || running || !loaded || !contextReady || paused) return;
     setError('');
@@ -353,8 +353,8 @@ export function Chat({
             <button
               onClick={() => {
                 setError('');
-                void copilotkit
-                  .connectAgent({ agent })
+                void api(`/conversations/${thread.id}/ensure`, 'POST')
+                  .then(() => copilotkit.connectAgent({ agent }))
                   .then(() => setLoaded(true))
                   .catch((e) => setError(e.message));
               }}

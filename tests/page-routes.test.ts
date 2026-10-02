@@ -222,3 +222,27 @@ it('restores review receipts through the owner API with current thread and Space
   ws.updateDot(dot.id, { ...dot, spaceId: other.id, spaceIds: [other.id] });
   expect((await app.request(`${base}/call`, { headers })).status).toBe(403);
 });
+
+it('keeps Discord channel threads in the web list under Intelligence UUID ids', async () => {
+  const { ws, app } = fixture();
+  const dot = ws.dots()[0];
+  ws.bindThread('web-chat', dot.id, 'Hi');
+  const discord = ws.bindChannelThread(
+    '1555492359171473429',
+    dot.id,
+    'Discord conversation',
+  );
+  const response = await app.request('/api/workspace');
+  expect(response.status).toBe(200);
+  const body = await response.json();
+  expect(body.conversations.map((c: { id: string }) => c.id).sort()).toEqual(
+    [discord.id, 'web-chat'].sort(),
+  );
+  expect(
+    body.conversations.find((c: { id: string }) => c.id === discord.id),
+  ).toMatchObject({
+    title: 'Discord conversation',
+    surface: 'channel',
+    channelKey: '1555492359171473429',
+  });
+});

@@ -82,6 +82,8 @@ export interface Dot {
   learningContainerId?: string | null;
   skillDeliveryEnabled?: boolean;
 }
+/** Origin surface for a bound Intelligence thread. */
+export type ConversationSurface = 'web' | 'channel' | 'page';
 export interface Conversation {
   id: string;
   dotId: string;
@@ -90,6 +92,13 @@ export interface Conversation {
   createdAt: number;
   /** Frozen at creation; null means this conversation does not participate. */
   learningContainerId?: string | null;
+  /** Where the thread was created (web UI, Discord/Slack channel, or page). */
+  surface: ConversationSurface;
+  /**
+   * External Channels conversation key when `id` is a derived Intelligence UUID
+   * (e.g. Discord snowflake). Null for native UUID threads.
+   */
+  channelKey?: string | null;
 }
 export interface CallReceipt {
   anchorMessageId?: string | null;

@@ -26,14 +26,22 @@ const channelError = () => ({
 export class DotAgent extends AbstractAgent {
   private inner?: BuiltInAgent;
   private controller?: AbortController;
+  /**
+   * @param channelTitle Provider-specific channel bind title when this agent
+   * serves Slack/Discord (e.g. "Discord conversation"). Null for web agents.
+   * Learning may bind first with a generic channel title; this corrects it.
+   */
   constructor(
     private store: Store,
     private workspace: WorkspaceStore,
     private config: PlatformConfig,
     private dotId: string,
-    private channel = false,
+    private channelTitle: string | null = null,
   ) {
     super({ agentId: dotId });
+  }
+  private get channel() {
+    return this.channelTitle !== null;
   }
   clone() {
     return new DotAgent(
@@ -41,7 +49,7 @@ export class DotAgent extends AbstractAgent {
       this.workspace,
       this.config,
       this.dotId,
-      this.channel,
+      this.channelTitle,
     );
   }
   abortRun() {
@@ -58,17 +66,14 @@ export class DotAgent extends AbstractAgent {
       try {
         const dot = this.workspace.dot(this.dotId);
         if (!dot) throw new Error('Specialist Dot not found.');
-        if (
-          this.channel &&
-          !this.workspace
-            .conversations()
-            .some((thread) => thread.id === input.threadId)
-        )
-          this.workspace.bindThread(
+        if (this.channelTitle) {
+          // Discord/Slack AG-UI threadIds may be non-UUID; bind a stable UUID.
+          this.workspace.bindChannelThread(
             input.threadId,
             dot.id,
-            'Slack conversation',
+            this.channelTitle,
           );
+        }
         const conversation = this.workspace.requireThread(
           input.threadId,
           dot.id,

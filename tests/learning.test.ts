@@ -107,8 +107,16 @@ it('selects only owned web threads and binds the configured channel Dot before i
       input: input('slack'),
     }),
   ).toBe('research');
-  expect(ws.requireThread('slack', dot.id).learningContainerId).toBe(
-    'research',
+  expect(ws.requireThread('slack', dot.id)).toMatchObject({
+    learningContainerId: 'research',
+    title: 'Channel conversation',
+    surface: 'channel',
+  });
+  const channel = ws.requireThread('slack', dot.id);
+  expect(channel.id).not.toBe('slack');
+  expect(channel.channelKey).toBe('slack');
+  expect(ws.conversations().map((t) => t.id)).toEqual(
+    expect.arrayContaining([channel.id, 'web']),
   );
   expect(() =>
     select({
