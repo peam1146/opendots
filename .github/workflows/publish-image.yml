@@ -1,0 +1,104 @@
+# Publish the OpenDots `app` image to Softnetics GHCR (primary deploy target).
+#
+# Image: ghcr.io/softnetics/opendots
+# Build: docker build --target app (linux/amd64)
+#
+# Required repo secrets on peam1146/OpenDots (Settings → Secrets and variables → Actions):
+#   SOFTNETICS_GHCR_TOKEN     Softnetics-capable PAT/classic token with write:packages
+#                             (and read:packages). Without this secret the job fails —
+#                             it will not silently publish only to peam1146.
+#   SOFTNETICS_GHCR_USERNAME  GitHub username that owns the token (defaults to peam1146
+#                             if unset). Must be able to push packages under softnetics.
+#
+# Softnetics / GitOps: after a successful tag run, pin the digest of
+# ghcr.io/softnetics/opendots:<tag> (e.g. v1.0.0 or 1.0.0), not a floating tag.
+# Cluster pull already uses Softnetics `ghcr-pull-secret`.
+#
+# Optional peam1146 mirror is intentionally omitted: ghcr.io uses one docker login at
+# a time, and Softnetics must remain the primary image Softnetics GitOps consumes.
+
+name: Publish image
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  PRIMARY_IMAGE: ghcr.io/softnetics/opendots
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Require Softnetics GHCR write token
+        env:
+          SOFTNETICS_GHCR_TOKEN: ${{ secrets.SOFTNETICS_GHCR_TOKEN }}
+        run: |
+          if [ -z "${SOFTNETICS_GHCR_TOKEN}" ]; then
+            echo "::error::SOFTNETICS_GHCR_TOKEN is missing. Add a Softnetics GHCR write token (PAT/classic with write:packages) as a repository secret on peam1146/OpenDots before this publish can succeed. Primary image is ghcr.io/softnetics/opendots — peam1146 is not a fallback deploy target."
+            exit 1
+          fi
+
+      - name: Resolve Softnetics GHCR username
+        id: softnetics
+        env:
+          SOFTNETICS_GHCR_USERNAME: ${{ secrets.SOFTNETICS_GHCR_USERNAME }}
+        run: |
+          echo "username=${SOFTNETICS_GHCR_USERNAME:-peam1146}" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to Softnetics GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ steps.softnetics.outputs.username }}
+          password: ${{ secrets.SOFTNETICS_GHCR_TOKEN }}
+
+      - name: Docker metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.PRIMARY_IMAGE }}
+          tags: |
+            type=semver,pattern={{raw}}
+            type=semver,pattern={{version}}
+            type=sha,prefix=sha-
+            type=raw,value=latest,enable=${{ startsWith(github.ref, 'refs/tags/v') }}
+
+      - name: Build and push app image
+        id: build
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: app
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Image summary for GitOps
+        run: |
+          {
+            echo "### Published image"
+            echo ""
+            echo "Primary (Softnetics GitOps): \`${PRIMARY_IMAGE}\`"
+            echo ""
+            echo "| Ref | Value |"
+            echo "| --- | --- |"
+            echo "| Tags | \`${{ steps.meta.outputs.tags }}\` |"
+            echo "| Digest | \`${{ steps.build.outputs.digest }}\` |"
+            echo ""
+            echo "Pin GitOps to the digest above (e.g. \`${PRIMARY_IMAGE}@${{ steps.build.outputs.digest }}\`), not a mutable tag."
+          } >> "$GITHUB_STEP_SUMMARY"

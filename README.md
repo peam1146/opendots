@@ -170,6 +170,19 @@ Open **http://127.0.0.1:5173**. You can create Spaces, write pages, and configur
 
 See [Setup](docs/SETUP.md) for configuration, Slack, Discord, calls, the browser service, and Docker.
 
+### Container image (Softnetics GHCR)
+
+Version tags matching `v*` (and manual `workflow_dispatch`) build `Dockerfile` target `app` and publish to **`ghcr.io/softnetics/opendots`** via [`.github/workflows/publish-image.yml`](.github/workflows/publish-image.yml). Image tags include the git tag (`v1.0.0`), the semver without `v` (`1.0.0`), `sha-<short>`, and `latest` on version tags. Platform: `linux/amd64`.
+
+Before the first tag publish succeeds, add these Actions secrets on `peam1146/OpenDots`:
+
+| Secret | Purpose |
+| --- | --- |
+| `SOFTNETICS_GHCR_TOKEN` | Softnetics-capable PAT/classic token with `write:packages` (required; job fails if missing) |
+| `SOFTNETICS_GHCR_USERNAME` | Token owner GitHub username (optional; defaults to `peam1146`) |
+
+Softnetics GitOps should pin the published digest (e.g. `ghcr.io/softnetics/opendots@sha256:…`) after the workflow finishes, using the existing Softnetics `ghcr-pull-secret`. Do not treat `ghcr.io/peam1146/opendots` as the cluster deploy image.
+
 ## Features
 
 | Area                       | Included                                                                                                                                |
