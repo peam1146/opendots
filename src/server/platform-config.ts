@@ -7,6 +7,8 @@ export interface PlatformConfig {
   model?: string;
   apiKey?: string;
   baseUrl: string;
+  /** Stable Responses affinity / prompt-cache key (Chimera and OpenAI). */
+  promptCacheKey?: string;
   computerSupervisorUrl?: string;
   computerSupervisorToken?: string;
   computerToken?: string;

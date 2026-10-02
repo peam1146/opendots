@@ -31,6 +31,11 @@ const config: PlatformConfig = {
   apiKey: process.env.OPENAI_API_KEY,
   model: process.env.OPENAI_MODEL,
   baseUrl: process.env.OPENAI_BASE_URL ?? 'https://api.openai.com/v1',
+  // Chimera Responses affinity: OPENAI_PROMPT_CACHE_KEY, else OWNER_ID.
+  promptCacheKey:
+    process.env.OPENAI_PROMPT_CACHE_KEY ||
+    process.env.OWNER_ID ||
+    'opendots-owner',
   browserUrl: process.env.BROWSER_URL,
   browserSecret: process.env.BROWSER_SECRET,
   computerSupervisorUrl: process.env.COMPUTER_SUPERVISOR_URL,
