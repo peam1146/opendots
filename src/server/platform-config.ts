@@ -13,6 +13,11 @@ export interface PlatformConfig {
   computerSupervisorToken?: string;
   computerToken?: string;
   computerNamespace?: string;
+  /**
+   * Cluster DNS hostname for published Dot computer ports (option B).
+   * Must match supervisor COMPUTER_ACCESS_HOST. No scheme or port.
+   */
+  computerAccessHost?: string;
   browserUrl?: string;
   browserSecret?: string;
   voiceKey?: string;

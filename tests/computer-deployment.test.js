@@ -4,6 +4,7 @@ import {
   hardenSupervisorDocker,
   hardenSupervisorEnvironment,
   hardenSupervisorIndex,
+  publishedHostPort,
 } from '../deployment/computers/harden-supervisor.mjs';
 
 const upstream = `export function environmentFor(botId, env) {
@@ -20,10 +21,39 @@ const dockerUpstream = `export class DockerUnavailableError extends Error {
   }
 }
 
+export type EnsureOptions = {
+  image: string;
+  /** A network to join, when the supervisor runs alongside a compose stack. */
+  network?: string;
+};
+
+function hostConfig(names, options) {
+  return {
+    ...(options.network
+      ? {}
+      : {
+          // Loopback, not the world. An unqualified binding publishes on 0.0.0.0, which would put
+          // every Bot's computer within reach of anything that can route to this machine. The token
+          // the computer requires is the control; this keeps the surface off the network as well,
+          // because both is the right number of locks on a browser holding somebody's logins.
+          PortBindings: {
+            [COMPUTER_PORT]: [{ HostIp: "127.0.0.1", HostPort: "" }],
+          },
+        }),
+  };
+}
+
 export async function ensure(
   names: ComputerNames,
   options: EnsureOptions,
 ): Promise<ComputerState> {
+    if (
+      existing &&
+      (!(await runsCurrentImage(existing.image, options.image)) ||
+        !holdsCurrentToken(existing.token, options.environment))
+    ) {
+      existing = null;
+    }
   if (!existing) {
       try {
         await docker.createContainer({
@@ -35,6 +65,13 @@ export async function ensure(
         throw error;
       }
   }
+  return {
+      ...(options.network
+        ? { url: \`http://\${names.container}:4100\` }
+        : settled?.port
+          ? { url: \`http://127.0.0.1:\${settled.port}\` }
+          : {}),
+  };
 }`;
 
 const indexUpstream = `import {
@@ -47,8 +84,17 @@ const indexUpstream = `import {
   reset,
   stop,
 } from "./docker";
+const network = process.env.COMPUTER_NETWORK?.trim() || undefined;
 app.post("/computers/:botId/ensure", async (context) => {
   try {
+    const state = await ensure(parsed.names, {
+      image,
+      environment: environmentFor(parsed.names.botId),
+      ...(network ? { network } : {}),
+      ...(runtime ? { runtime } : {}),
+      ...(memoryBytes ? { memoryBytes } : {}),
+      ...(spireSocketVolume ? { spireSocketVolume } : {}),
+    });
     return context.json({});
   } catch (error) {
     if (
@@ -111,12 +157,36 @@ it('pulls COMPUTER_IMAGE before create when ensure would create a container', ()
   expect(patched).toContain('docker.pull(image)');
 });
 
-it('reports ImageUnavailableError from ensure and lengthens idle timeout for pulls', () => {
+it('publishes cluster-reachable ports and returns access-host URLs', () => {
+  const patched = hardenSupervisorDocker(dockerUpstream);
+  expect(patched).toContain('accessHost?: string');
+  expect(patched).toContain('HostIp: "0.0.0.0"');
+  expect(patched).toContain(
+    'url: `http://${options.accessHost}:${settled.port}`',
+  );
+  expect(patched).toContain('existing.port !== options.hostPort');
+  expect(patched).toContain('HostIp: "127.0.0.1"');
+});
+
+it('wires COMPUTER_ACCESS_HOST into ensure and lengthens idle timeout for pulls', () => {
   const patched = hardenSupervisorIndex(indexUpstream);
   expect(patched).toMatch(/ImageUnavailableError/);
   expect(patched).toContain('idleTimeout: 600');
   expect(patched).not.toContain('idleTimeout: 120');
+  expect(patched).toContain('COMPUTER_ACCESS_HOST');
+  expect(patched).toContain('hostPort: publishedHostPort(');
   expect(patched.indexOf('ImageUnavailableError')).toBeLessThan(
     patched.indexOf('DockerUnavailableError ||'),
   );
+});
+
+it('assigns stable publish ports inside the configured span', () => {
+  const first = publishedHostPort('dot-a', 44100, 256);
+  const second = publishedHostPort('dot-a', 44100, 256);
+  const other = publishedHostPort('dot-b', 44100, 256);
+  expect(first).toBe(second);
+  expect(first).toBeGreaterThanOrEqual(44100);
+  expect(first).toBeLessThan(44100 + 256);
+  expect(other).toBeGreaterThanOrEqual(44100);
+  expect(other).toBeLessThan(44100 + 256);
 });

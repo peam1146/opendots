@@ -170,6 +170,17 @@ export class ComputerService {
       deadlineMs,
     );
   }
+  private accessHost(): string | undefined {
+    const host = this.config.computerAccessHost?.trim().toLowerCase();
+    if (!host) return undefined;
+    if (
+      host.length > 253 ||
+      !/^[a-z0-9]([a-z0-9.-]*[a-z0-9])?$/.test(host) ||
+      host.includes('..')
+    )
+      throw new Error('Invalid computer access host.');
+    return host;
+  }
   private endpoint(id: string, raw: unknown) {
     const state = stateSchema.parse(raw);
     const ns = this.config.computerNamespace ?? 'opendots';
@@ -178,11 +189,14 @@ export class ComputerService {
     const expected = `${ns}-computer-${id}`;
     if (state.botId !== id || state.container !== expected)
       throw new Error('Computer identity mismatch.');
+    const access = this.accessHost();
     const url = new URL(
       state.url ??
-        (state.port
-          ? `http://127.0.0.1:${state.port}`
-          : `http://${expected}:4100`),
+        (state.port && access
+          ? `http://${access}:${state.port}`
+          : state.port
+            ? `http://127.0.0.1:${state.port}`
+            : `http://${expected}:4100`),
     );
     const network =
       url.hostname === expected.toLowerCase() && url.port === '4100';
@@ -191,6 +205,11 @@ export class ComputerService {
       !!state.port &&
       url.port === String(state.port) &&
       new URL(this.config.computerSupervisorUrl!).hostname === '127.0.0.1';
+    const published =
+      !!access &&
+      !!state.port &&
+      url.hostname === access &&
+      url.port === String(state.port);
     if (
       url.protocol !== 'http:' ||
       url.username ||
@@ -198,7 +217,7 @@ export class ComputerService {
       url.pathname !== '/' ||
       url.search ||
       url.hash ||
-      (!network && !local)
+      (!network && !local && !published)
     )
       throw new Error('Computer endpoint is not bound to this Dot.');
     return url.origin;
