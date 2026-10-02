@@ -168,11 +168,15 @@ it('publishes cluster-reachable ports and returns access-host URLs', () => {
   expect(patched).toContain('HostIp: "127.0.0.1"');
 });
 
-it('wires COMPUTER_ACCESS_HOST into ensure and lengthens idle timeout for pulls', () => {
+it('wires COMPUTER_ACCESS_HOST into ensure and caps Bun idleTimeout for pulls', () => {
   const patched = hardenSupervisorIndex(indexUpstream);
   expect(patched).toMatch(/ImageUnavailableError/);
-  expect(patched).toContain('idleTimeout: 600');
+  // Bun.serve throws at boot if idleTimeout > 255 (CrashLoop on v1.0.3).
+  expect(patched).toContain('idleTimeout: 255');
   expect(patched).not.toContain('idleTimeout: 120');
+  expect(patched).not.toContain('idleTimeout: 600');
+  expect(patched).toContain('server.timeout(req, 600)');
+  expect(patched).toContain('pathname.endsWith("/ensure")');
   expect(patched).toContain('COMPUTER_ACCESS_HOST');
   expect(patched).toContain('hostPort: publishedHostPort(');
   expect(patched.indexOf('ImageUnavailableError')).toBeLessThan(
