@@ -144,11 +144,11 @@ DISCORD_USER_IDS=REPLACE_WITH_YOUR_USER_ID
 DISCORD_DOT_ID=REPLACE_WITH_DOT_ID
 ```
 
-`DISCORD_CHANNEL_NAME` is the project-unique Intelligence Channel name declared in code, not a Discord `#channel` name. Keep it distinct from `SLACK_CHANNEL_NAME` if both are configured. `DISCORD_GUILD_ID` and the comma-separated `DISCORD_USER_IDS` restrict who may invoke the specialist (guild DMs and other guilds are denied). `DISCORD_DOT_ID` selects an existing Dot; if omitted, it defaults to the initial Dot.
+`DISCORD_CHANNEL_NAME` is the project-unique Intelligence Channel name declared in code, not a Discord `#channel` name. Keep it distinct from `SLACK_CHANNEL_NAME` if both are configured. `DISCORD_GUILD_ID` and the comma-separated `DISCORD_USER_IDS` restrict who may invoke the specialist (guild DMs and other guilds are denied). Set `DISCORD_USER_IDS=*` (a lone asterisk) to allow any human actor in that guild; an empty allowlist still means Discord is not configured. `DISCORD_DOT_ID` selects an existing Dot; if omitted, it defaults to the initial Dot.
 
 Restart OpenDots after changing environment settings and inspect Discord status in Settings & setup. Channel activation must complete before trying a message. Mention the installed bot in a guild channel it can access; subsequent messages in that followed thread go to the same specialist. Unrelated threads, bot events, edits, deletions, and users outside the allowlist do not start agent runs.
 
-This template maps permitted Discord users to the single OpenDots owner. Replies are visible to the Discord conversation's audience, so choose the specialist's Space access and permitted tools accordingly. This is not a multi-user identity model.
+This template maps permitted Discord users to the single OpenDots owner — including when `DISCORD_USER_IDS=*`, so every allowed guild member shares that owner identity. Replies are visible to the Discord conversation's audience, so choose the specialist's Space access and permitted tools accordingly. This is not a multi-user identity model.
 
 ### Verify your deployment
 

@@ -1,5 +1,7 @@
 import { expect, it } from 'vitest';
 import {
+  discordConfigured,
+  discordUserAllowed,
   setupStatus,
   type PlatformConfig,
 } from '../src/server/platform-config.js';
@@ -48,6 +50,30 @@ it('never claims Discord online without a complete direct adapter declaration', 
       'online',
     ).discord,
   ).toBe('online');
+});
+it('treats a lone * Discord allowlist as configured while empty stays not configured', () => {
+  const base = {
+    discordChannel: 'opendots-discord',
+    discordBotToken: 'token',
+    discordAppId: 'app',
+    discordGuild: 'guild',
+  };
+  expect(discordConfigured({ ...base, discordUsers: [] })).toBe(false);
+  expect(discordConfigured({ ...base, discordUsers: ['*'] })).toBe(true);
+  expect(
+    setupStatus({ ...config, ...base, discordUsers: ['*'] }, 'online').discord,
+  ).toBe('online');
+  expect(
+    setupStatus({ ...config, ...base, discordUsers: [] }, 'online').discord,
+  ).toBe('setup_required');
+});
+it('matches Discord allowlists for * vs explicit ids vs empty', () => {
+  expect(discordUserAllowed(['*'], 'anyone')).toBe(true);
+  expect(discordUserAllowed(['person'], 'person')).toBe(true);
+  expect(discordUserAllowed(['person'], 'other')).toBe(false);
+  expect(discordUserAllowed(['person', 'other'], 'other')).toBe(true);
+  expect(discordUserAllowed([], 'anyone')).toBe(false);
+  expect(discordUserAllowed(['*', 'person'], 'anyone')).toBe(false);
 });
 it('requires Intelligence and model setup and disables voice when either is absent', () => {
   expect(
