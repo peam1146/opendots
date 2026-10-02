@@ -40,6 +40,45 @@ docker compose -f compose.yml -f compose.computers.yml -f compose.computers-app.
 
 Here, the app addresses computers by their container names. Computers have no published host ports. The supervisor lives on a separate control network, and only the supervisor mounts the Docker socket. Neither the web app nor a Dot's computer receives that socket. Changing the namespace changes which containers and volumes are selected; keep it stable and unique for each deployment.
 
+## Kubernetes / DinD (cluster-reachable computers)
+
+Do **not** co-locate the OpenDots web app with privileged DinD (option A). Prefer **option B**: the supervisor publishes each Dot computer’s port `4100` onto the DinD/Pod network namespace, and the app reaches it through cluster DNS + a Service.
+
+Upstream OpenBot `ensure` returns either `http://{ns}-computer-{dotId}:4100` (DinD-internal Docker DNS when `COMPUTER_NETWORK` is set) or `http://127.0.0.1:{ephemeral}` (loopback publish). An app Pod on the cluster CNI cannot use either. Softnetics supervisor patches add cluster publish mode:
+
+| Env (supervisor + app unless noted) | Purpose                                                                                                                                                                                     |
+| ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `COMPUTER_ACCESS_HOST`              | DNS hostname the **app** may call (strict allowlist). Same value on supervisor so `ensure` returns `http://{host}:{port}`. Example: `bigc-opendots-computer-supervisor`. No scheme or port. |
+| `COMPUTER_PUBLISH_PORT_BASE`        | Supervisor only. First host port in the publish range (default `44100`).                                                                                                                    |
+| `COMPUTER_PUBLISH_PORT_SPAN`        | Supervisor only. Size of the range (default `256` → ports `44100`–`44355`). Each Dot gets a **deterministic** port in this range so GitOps can declare Service ports ahead of time.         |
+| `COMPUTER_SUPERVISOR_URL`           | App → supervisor API (usually `http://{COMPUTER_ACCESS_HOST}:4300`).                                                                                                                        |
+| `COMPUTER_NETWORK`                  | Prefer **empty/unset** in this mode. If set, computers still join that Docker network, but URLs use `COMPUTER_ACCESS_HOST` + published ports (not container DNS).                           |
+
+Publish binds `0.0.0.0` (not loopback) so traffic to the Pod IP / ClusterIP reaches the mapping. On the next `ensure` after enabling access-host mode, the supervisor replaces owned containers whose published port does not match the deterministic assignment (volumes are retained).
+
+### GitOps Service requirements (draft for minipc-gitops)
+
+Do not edit softnetics/minipc-gitops from this repo; apply the following there:
+
+1. **Supervisor Service** (existing API): ClusterIP (or equivalent) exposing port `4300` → supervisor container port `4300`. App `COMPUTER_SUPERVISOR_URL=http://<that-Service-DNS>:4300`.
+2. **Computer access ports**: On the **same** Service (or a dedicated access Service selecting the same Pod), expose **every** port in `[COMPUTER_PUBLISH_PORT_BASE, BASE+SPAN)`. Example for defaults:
+
+```yaml
+# Illustrative — generate the full list in GitOps (256 entries for defaults).
+ports:
+  - name: supervisor
+    port: 4300
+    targetPort: 4300
+  - name: computer-44100
+    port: 44100
+    targetPort: 44100
+  # ... computer-44101 .. computer-44355
+```
+
+`targetPort` must equal `port`: DinD publishes child containers onto the Pod netns at that host port. 3. **App env**: set `COMPUTER_ACCESS_HOST` to that Service DNS name (short name in the namespace is fine). Keep `COMPUTER_NAMESPACE` aligned with the deployment (e.g. `bigc-opendots`). 4. **Supervisor env**: same `COMPUTER_ACCESS_HOST`, same publish base/span, `COMPUTER_IMAGE` digest, tokens, and usually empty `COMPUTER_NETWORK`. 5. Rebuild/redeploy the Softnetics supervisor image that includes these harden patches after merge.
+
+The app allowlist accepts only: `{ns}-computer-{id}:4100`, loopback+published port when the supervisor URL host is also loopback, or `{COMPUTER_ACCESS_HOST}:{publishedPort}` when configured. Arbitrary returned URLs are still rejected.
+
 ## Use the computer
 
 - **Browser:** navigate and inspect the current page, including screenshots and element snapshots. Browser profiles keep cookies and logins across container restarts.
@@ -58,7 +97,7 @@ The template uses standard Docker container isolation; containers share the host
 
 Create two Dots and enable the capabilities being tested. Write a file in the first computer, then verify that the second cannot list it. Stop/start the first and verify the file persists. Test a browser session across a restart, takeover and handback, disabled permissions, and pause behavior. Confirm that computer tools fail clearly if the service is unavailable.
 
-A configured endpoint is not evidence that Docker successfully provisioned a computer. An unavailable status can mean the Docker daemon is down, the image was not built, credentials differ, or the app cannot reach the returned computer address. Use the local arrangement for a host-run app and the app overlay for a container-run app. Do not substitute an arbitrary returned service URL or expose the computer API directly to the internet.
+A configured endpoint is not evidence that Docker successfully provisioned a computer. An unavailable status can mean the Docker daemon is down, the image was not built or cannot be pulled, credentials differ, or the app cannot reach the returned computer address. On ensure, the Softnetics supervisor patch pulls `COMPUTER_IMAGE` when it is missing locally; if pull is denied (private GHCR without DinD credentials) or create fails, Start shows the supervisor’s error detail rather than a bare HTTP 503. Use the local arrangement for a host-run app and the app overlay for a container-run app. Do not substitute an arbitrary returned service URL or expose the computer API directly to the internet.
 
 The source revision and the narrow per-Dot credential patch are documented in [deployment/computers](../deployment/computers/README.md). Softnetics GHCR publishes the same pinned recipes as `ghcr.io/softnetics/opendots-computer` and `ghcr.io/softnetics/opendots-supervisor` (see that README and the publish workflow). Keep those two images paired; set supervisor `COMPUTER_IMAGE` to the computer digest. On a master-token or image change, the supervisor replaces owned computer containers on their next ensure request, retaining their profile and workspace volumes. This ends any in-flight activity; coordinate updates with active work.
 

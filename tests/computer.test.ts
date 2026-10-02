@@ -227,10 +227,63 @@ it('preserves recovery handback after permissions are revoked; upstream failures
   f.handle(async () =>
     Response.json({ error: 'secret upstream detail' }, { status: 500 }),
   );
-  await expect(f.service.action(f.id, 'read', {})).rejects.toThrow('HTTP 500');
+  await expect(f.service.action(f.id, 'read', {})).rejects.toThrow(
+    'HTTP 500: secret upstream detail',
+  );
   f.handle(async () => new Response('x'.repeat(4_000_001)));
   await expect(f.service.action(f.id, 'read', {})).rejects.toThrow(
     'size limit',
+  );
+});
+it('surfaces supervisor ensure failures with detail instead of a bare HTTP status', async () => {
+  const f = fixture();
+  const transport: typeof fetch = async (input, init) => {
+    const url = String(input);
+    f.calls.push({ url, init });
+    if (url.endsWith('/ensure'))
+      return Response.json(
+        {
+          error:
+            'Computer image "ghcr.io/softnetics/opendots-computer@sha256:abc" is not available locally and could not be pulled (denied). Preload it into this Docker Engine, or configure registry credentials for pulls.',
+        },
+        { status: 503 },
+      );
+    return f.transport(input, init);
+  };
+  const service = new ComputerService(
+    f.workspace,
+    f.config,
+    () => false,
+    transport,
+  );
+  await expect(service.start(f.id)).rejects.toThrow(
+    /HTTP 503: Computer image .*could not be pulled/,
+  );
+  expect(f.calls.some((call) => call.url.endsWith('/ensure'))).toBe(true);
+});
+it('redacts service secrets when surfacing supervisor error bodies', async () => {
+  const f = fixture();
+  const transport: typeof fetch = async (input, init) => {
+    const url = String(input);
+    f.calls.push({ url, init });
+    if (url.endsWith('/ensure'))
+      return Response.json(
+        {
+          error: `Docker failed with token ${f.config.computerSupervisorToken}`,
+        },
+        { status: 503 },
+      );
+    return f.transport(input, init);
+  };
+  const service = new ComputerService(
+    f.workspace,
+    f.config,
+    () => false,
+    transport,
+  );
+  await expect(service.start(f.id)).rejects.toThrow(/\[redacted\]/);
+  await expect(service.start(f.id)).rejects.not.toThrow(
+    f.config.computerSupervisorToken!,
   );
 });
 it('binds tools to the current Dot without exposing human or policy controls', async () => {
@@ -291,6 +344,115 @@ it('accepts an uppercase namespace while preserving exact container identity', a
     text: 'result',
   });
   expect(f.calls.at(-1)?.url).toBe(`http://mydots-computer-${f.id}:4100/read`);
+});
+
+it('accepts COMPUTER_ACCESS_HOST publish URLs and rejects foreign hosts', async () => {
+  const f = fixture();
+  const access = 'bigc-opendots-computer-supervisor';
+  const config = {
+    ...f.config,
+    computerSupervisorUrl: `http://${access}:4300`,
+    computerAccessHost: access,
+  };
+  const transport: typeof fetch = async (input, init) => {
+    const url = String(input);
+    f.calls.push({ url, init });
+    if (url.endsWith('/computers'))
+      return Response.json({
+        computers: [
+          {
+            botId: f.id,
+            container: `opendots-computer-${f.id}`,
+            status: 'running',
+            port: 44107,
+            url: `http://${access}:44107`,
+          },
+        ],
+      });
+    if (url.endsWith('/ensure'))
+      return Response.json({
+        botId: f.id,
+        container: `opendots-computer-${f.id}`,
+        status: 'running',
+        port: 44107,
+        url: `http://${access}:44107`,
+      });
+    return f.transport(input, init);
+  };
+  const service = new ComputerService(
+    f.workspace,
+    config,
+    () => false,
+    transport,
+  );
+  await expect(service.start(f.id)).resolves.toMatchObject({
+    state: 'running',
+  });
+  expect(
+    f.calls.some((call) => call.url === `http://${access}:44107/control`),
+  ).toBe(true);
+  await expect(service.action(f.id, 'read', {})).resolves.toEqual({
+    text: 'result',
+  });
+  expect(f.calls.at(-1)?.url).toBe(`http://${access}:44107/read`);
+
+  const foreign = new ComputerService(
+    f.workspace,
+    config,
+    () => false,
+    async (input, init) => {
+      if (String(input).endsWith('/computers'))
+        return Response.json({
+          computers: [
+            {
+              botId: f.id,
+              container: `opendots-computer-${f.id}`,
+              status: 'running',
+              port: 44107,
+              url: 'http://attacker.test:44107',
+            },
+          ],
+        });
+      return transport(input, init);
+    },
+  );
+  await expect(foreign.action(f.id, 'read', {})).rejects.toThrow('endpoint');
+});
+
+it('builds access-host URLs from published ports when ensure omits url', async () => {
+  const f = fixture();
+  const access = 'bigc-opendots-computer-supervisor';
+  const config = {
+    ...f.config,
+    computerSupervisorUrl: `http://${access}:4300`,
+    computerAccessHost: access,
+  };
+  const transport: typeof fetch = async (input, init) => {
+    const url = String(input);
+    f.calls.push({ url, init });
+    if (url.endsWith('/computers'))
+      return Response.json({
+        computers: [
+          {
+            botId: f.id,
+            container: `opendots-computer-${f.id}`,
+            status: 'running',
+            port: 44210,
+          },
+        ],
+      });
+    return Response.json({ text: 'result' });
+  };
+  const service = new ComputerService(
+    f.workspace,
+    config,
+    () => false,
+    transport,
+  );
+  await expect(service.action(f.id, 'read', {})).resolves.toEqual({
+    text: 'result',
+  });
+  expect(f.calls.at(-1)?.url).toBe(`http://${access}:44210/read`);
 });
 
 it('gives agents a safe recovery instruction for stale browser or control conflicts', async () => {
